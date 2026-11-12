@@ -8,12 +8,14 @@ import pandas as pd
 import streamlit as st
 
 from db import COLUMNS, generate_exact_xlsx, get_all_logs, init_db
+from nav import render_nav
 
 st.set_page_config(
     page_title="Admin | Wood Lamination Logs",
     page_icon="🪵",
     layout="wide",
 )
+render_nav()
 init_db()
 
 st.title("🪵 Production Log Admin")

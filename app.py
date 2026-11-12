@@ -4,8 +4,10 @@ import pandas as pd
 import streamlit as st
 
 from db import COLUMNS, delete_roll, generate_exact_xlsx, get_all_logs, init_db, update_roll_fields
+from nav import render_nav
 
 st.set_page_config(page_title="Production Logs | Supervisor", page_icon="🪵", layout="wide")
+render_nav()
 init_db()
 
 st.title("🪵 Wood Lamination — Production Logs")

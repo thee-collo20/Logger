@@ -3,9 +3,10 @@
 import streamlit as st
 
 from db import get_all_rolls, init_db, update_roll_fields
+from nav import render_nav
 
 st.set_page_config(page_title="Resin Content | Lamination Logger", page_icon="🪵", layout="centered")
-st.markdown("<style>[data-testid=\"stSidebar\"] {display: none;}</style>", unsafe_allow_html=True)
+render_nav()
 init_db()
 
 st.title("Resin Content")
