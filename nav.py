@@ -4,13 +4,13 @@ import streamlit as st
 
 
 def render_nav() -> None:
-    """Render links to every app page in a touch-friendly horizontal bar."""
+    """Render navigation to pages registered in Streamlit's pages directory."""
     links = [
         ("app.py", "Dashboard", "📊"),
         ("pages/1_Paper_ID.py", "Paper ID", "🪵"),
         ("pages/2_Resin_Content.py", "Resin Content", "🧪"),
         ("pages/3_Ovens_Line.py", "Ovens & Line", "🔥"),
-        ("admin.py", "Admin", "📋"),
+        ("pages/4_Admin.py", "Admin", "📋"),
     ]
     st.markdown(
         """
@@ -20,6 +20,10 @@ def render_nav() -> None:
             border-radius: 0.6rem;
             font-weight: 600;
             justify-content: center;
+        }
+        @media (max-width: 700px) {
+            div[data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
+            div[data-testid="stHorizontalBlock"] > div { min-width: 30%; }
         }
         </style>
         """,
