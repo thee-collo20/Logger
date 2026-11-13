@@ -2,10 +2,12 @@
 
 import streamlit as st
 
+from auth import require_role
 from db import get_all_rolls, init_db, update_roll_fields
 from nav import render_nav
 
 st.set_page_config(page_title="Resin Content | Lamination Logger", page_icon="🪵", layout="centered")
+user = require_role({"Admin", "Supervisor", "Operator"})
 render_nav()
 init_db()
 
@@ -26,7 +28,11 @@ else:
         left = st.number_input("Left", min_value=0.0, value=0.0, step=0.1, format="%.3f")
         submitted = st.form_submit_button("Save Resin Content", type="primary", use_container_width=True)
     if submitted:
-        if update_roll_fields(selected_id, {"right_resin": right, "center_resin": center, "left_resin": left}):
+        if update_roll_fields(
+            selected_id,
+            {"right_resin": right, "center_resin": center, "left_resin": left},
+            actor=user["username"], rank=user["rank"], station="Resin Content",
+        ):
             st.success(f"Resin content saved for {labels[selected_id]}.")
         else:
             st.error("The selected roll no longer exists. Refresh this page and try again.")

@@ -3,10 +3,12 @@
 import pandas as pd
 import streamlit as st
 
+from auth import require_role
 from db import get_all_rolls, get_next_id, init_db, insert_roll
 from nav import render_nav
 
 st.set_page_config(page_title="Paper ID | Lamination Logger", page_icon="🪵", layout="centered")
+user = require_role({"Admin", "Supervisor", "Operator"})
 render_nav()
 init_db()
 
@@ -26,14 +28,13 @@ if submitted:
         st.error("Please enter a paper name.")
     else:
         name = name[0].upper() + name[1:]
-        roll_id = insert_roll(name, gsm, output)
+        roll_id = insert_roll(name, gsm, output, actor=user["username"], rank=user["rank"])
         st.success(f"Logged successfully — ID #{roll_id}: {name}")
 
 st.divider()
 st.subheader("Roll ID register")
 rolls = get_all_rolls()
 if rolls:
-    # Sort only for presentation; insertion and database workflows are unchanged.
     register = pd.DataFrame(rolls, columns=["ID", "Name"]).sort_values("ID", ascending=True)
     st.dataframe(register, use_container_width=True, hide_index=True)
 else:

@@ -15,8 +15,8 @@ DB_PATH = Path(__file__).resolve().parent / "production_logs.db"
 FACTORY_TIMEZONE = ZoneInfo("Africa/Nairobi")
 SHIFT_NAMES = ("Day", "Night")
 
-# Keep the requested report columns unchanged. Timestamp and shift metadata are
-# supplemental database fields and are not added to the exact XLSX layout.
+# Keep the requested report columns unchanged. Timestamp, attribution, and shift metadata
+# are supplemental database fields and are not added to the exact XLSX layout.
 COLUMNS = (
     "id", "name", "right_resin", "center_resin", "left_resin", "gsm",
     "output", "oven_1", "oven_2", "oven_3", "oven_4", "oven_5",
@@ -47,7 +47,7 @@ def shift_for_datetime(value: datetime) -> tuple[str, str]:
 
 
 def init_db() -> None:
-    """Create the log table and migrate timestamp/shift fields on older databases."""
+    """Create production/recipe tables and migrate older log databases."""
     with get_connection() as connection:
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute(
@@ -69,13 +69,40 @@ def init_db() -> None:
                 log_time TEXT,
                 created_at TEXT,
                 shift_date TEXT,
-                shift_name TEXT
+                shift_name TEXT,
+                logged_by TEXT,
+                updated_by TEXT,
+                updated_at TEXT
             )"""
         )
         existing = {row["name"] for row in connection.execute("PRAGMA table_info(logs)")}
-        for column in ("created_at", "shift_date", "shift_name"):
+        for column in ("created_at", "shift_date", "shift_name", "logged_by", "updated_by", "updated_at"):
             if column not in existing:
                 connection.execute(f"ALTER TABLE logs ADD COLUMN {column} TEXT")
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS log_activity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                roll_id INTEGER NOT NULL,
+                actor TEXT NOT NULL,
+                rank TEXT NOT NULL,
+                station TEXT NOT NULL,
+                action TEXT NOT NULL,
+                changed_fields TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )"""
+        )
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS glue_recipes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                ingredients TEXT NOT NULL,
+                instructions TEXT NOT NULL,
+                created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )"""
+        )
         # Legacy rows are intentionally left unassigned; their date/shift cannot
         # be inferred reliably from the old time-only field.
 
@@ -94,31 +121,108 @@ def get_all_rolls() -> list[tuple[int, str]]:
     return [(int(row["id"]), row["name"] or "") for row in rows]
 
 
-def insert_roll(name: str, gsm: float, output: float) -> int:
-    """Create a roll and assign it to the shift active at creation in EAT."""
+def insert_roll(name: str, gsm: float, output: float, actor: str = "Unknown", rank: str = "Unknown") -> int:
+    """Create a roll, assign its active shift, and record who logged it."""
     now = datetime.now(FACTORY_TIMEZONE)
     created_at = now.isoformat(timespec="seconds")
     shift_date, shift_name = shift_for_datetime(now)
     with get_connection() as connection:
         cursor = connection.execute(
-            """INSERT INTO logs (name, gsm, output, created_at, shift_date, shift_name)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (name, gsm, output, created_at, shift_date, shift_name),
+            """INSERT INTO logs (name, gsm, output, created_at, shift_date, shift_name, logged_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (name, gsm, output, created_at, shift_date, shift_name, actor),
         )
-        return int(cursor.lastrowid)
+        roll_id = int(cursor.lastrowid)
+        connection.execute(
+            """INSERT INTO log_activity (roll_id, actor, rank, station, action, changed_fields, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (roll_id, actor, rank, "Paper ID", "Created roll", "name, gsm, output", created_at),
+        )
+        return roll_id
 
 
-def update_roll_fields(roll_id: int, values: Mapping[str, Any]) -> bool:
-    """Update explicitly allow-listed production fields; shift tags are admin-editable."""
+def update_roll_fields(
+    roll_id: int,
+    values: Mapping[str, Any],
+    actor: str = "Unknown",
+    rank: str = "Unknown",
+    station: str = "Production",
+) -> bool:
+    """Update allow-listed production fields and record the actor and station."""
     editable = (set(COLUMNS) - {"id"}) | {"shift_date", "shift_name"}
     if not values or not set(values).issubset(editable):
         raise ValueError("No fields supplied or unsupported field name.")
+    now = datetime.now(FACTORY_TIMEZONE).isoformat(timespec="seconds")
     assignments = ", ".join(f'"{column}" = ?' for column in values)
     parameters = [values[column] for column in values]
-    parameters.append(int(roll_id))
+    parameters.extend((actor, now, int(roll_id)))
     with get_connection() as connection:
-        cursor = connection.execute(f"UPDATE logs SET {assignments} WHERE id = ?", parameters)
-        return cursor.rowcount > 0
+        cursor = connection.execute(
+            f"UPDATE logs SET {assignments}, updated_by = ?, updated_at = ? WHERE id = ?",
+            parameters,
+        )
+        if not cursor.rowcount:
+            return False
+        connection.execute(
+            """INSERT INTO log_activity (roll_id, actor, rank, station, action, changed_fields, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (int(roll_id), actor, rank, station, "Updated production log", ", ".join(values), now),
+        )
+        return True
+
+
+def get_recent_activity(limit: int = 500) -> list[dict[str, Any]]:
+    """Return recent user-attributed production changes for audit/review."""
+    with get_connection() as connection:
+        rows = connection.execute(
+            """SELECT a.created_at, a.roll_id, l.shift_date, l.shift_name,
+                      a.actor, a.rank, a.station, a.action, a.changed_fields
+               FROM log_activity AS a LEFT JOIN logs AS l ON l.id = a.roll_id
+               ORDER BY a.id DESC LIMIT ?""",
+            (max(1, min(int(limit), 5000)),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_all_logs(descending: bool = True) -> list[dict[str, Any]]:
+    """Return production records with timestamps, shift, and user attribution."""
+    order = "DESC" if descending else "ASC"
+    columns = ", ".join((*COLUMNS, "created_at", "shift_date", "shift_name", "logged_by", "updated_by", "updated_at"))
+    with get_connection() as connection:
+        rows = connection.execute(f"SELECT {columns} FROM logs ORDER BY id {order}").fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_glue_recipes() -> list[dict[str, Any]]:
+    """Return all saved glue recipes in name order."""
+    with get_connection() as connection:
+        rows = connection.execute("SELECT * FROM glue_recipes ORDER BY name COLLATE NOCASE").fetchall()
+    return [dict(row) for row in rows]
+
+
+def save_glue_recipe(name: str, ingredients: str, instructions: str, actor: str, recipe_id: int | None = None) -> int:
+    """Create a named recipe or update an existing recipe without deleting history."""
+    clean_name = name.strip()
+    if not clean_name or not ingredients.strip() or not instructions.strip():
+        raise ValueError("Recipe name, ingredients, and mixing instructions are required.")
+    now = datetime.now(FACTORY_TIMEZONE).isoformat(timespec="seconds")
+    with get_connection() as connection:
+        if recipe_id is None:
+            cursor = connection.execute(
+                """INSERT INTO glue_recipes
+                   (name, ingredients, instructions, created_by, updated_by, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (clean_name, ingredients.strip(), instructions.strip(), actor, actor, now, now),
+            )
+            return int(cursor.lastrowid)
+        cursor = connection.execute(
+            """UPDATE glue_recipes SET name = ?, ingredients = ?, instructions = ?,
+               updated_by = ?, updated_at = ? WHERE id = ?""",
+            (clean_name, ingredients.strip(), instructions.strip(), actor, now, int(recipe_id)),
+        )
+        if not cursor.rowcount:
+            raise ValueError("The selected recipe no longer exists. Refresh and try again.")
+        return int(recipe_id)
 
 
 def delete_roll(roll_id: int) -> bool:
@@ -126,15 +230,6 @@ def delete_roll(roll_id: int) -> bool:
     with get_connection() as connection:
         cursor = connection.execute("DELETE FROM logs WHERE id = ?", (int(roll_id),))
         return cursor.rowcount > 0
-
-
-def get_all_logs(descending: bool = True) -> list[dict[str, Any]]:
-    """Return records with timestamp and shift metadata, ordered by roll ID."""
-    order = "DESC" if descending else "ASC"
-    columns = ", ".join((*COLUMNS, "created_at", "shift_date", "shift_name"))
-    with get_connection() as connection:
-        rows = connection.execute(f"SELECT {columns} FROM logs ORDER BY id {order}").fetchall()
-    return [dict(row) for row in rows]
 
 
 def _build_workbook(records: list[sqlite3.Row]) -> io.BytesIO:
@@ -171,7 +266,6 @@ def generate_shift_xlsx(shift_date: str, shift_name: str) -> io.BytesIO:
     """Build an exact-layout workbook containing only one date and shift."""
     if shift_name not in SHIFT_NAMES:
         raise ValueError("shift_name must be 'Day' or 'Night'.")
-    # Validate canonical ISO date before using the date string as a query value.
     if date.fromisoformat(shift_date).isoformat() != shift_date:
         raise ValueError("shift_date must be an ISO date (YYYY-MM-DD).")
     with get_connection() as connection:
