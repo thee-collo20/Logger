@@ -17,13 +17,14 @@ def render_nav() -> None:
         <style>
         div[data-testid="stPageLink"] a {
             min-height: 2.8rem;
+            border: 1px solid #485459;
             border-radius: 0.6rem;
             font-weight: 600;
             justify-content: center;
         }
-        @media (max-width: 700px) {
-            div[data-testid="stHorizontalBlock"] { flex-wrap: wrap; }
-            div[data-testid="stHorizontalBlock"] > div { min-width: 30%; }
+        div[data-testid="stPageLink"] a:hover {
+            border-color: #F59E0B;
+            color: #FBBF24;
         }
         </style>
         """,
