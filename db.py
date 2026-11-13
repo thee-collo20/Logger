@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -11,6 +12,8 @@ from openpyxl import Workbook
 
 DB_PATH = Path(__file__).resolve().parent / "production_logs.db"
 
+# Keep the report's established columns unchanged. created_at is supplemental
+# metadata used by time-series dashboards and is deliberately not in the XLSX.
 COLUMNS = (
     "id",
     "name",
@@ -32,16 +35,14 @@ COLUMNS = (
 
 def get_connection() -> sqlite3.Connection:
     """Return a configured connection; callers are responsible for closing it."""
-    connection = sqlite3.connect(
-        DB_PATH, timeout=15, check_same_thread=False
-    )
+    connection = sqlite3.connect(DB_PATH, timeout=15, check_same_thread=False)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA busy_timeout = 15000")
     return connection
 
 
 def init_db() -> None:
-    """Create the production log table if it does not already exist."""
+    """Create the log table and safely add timestamp support to older databases."""
     with get_connection() as connection:
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute(
@@ -60,9 +61,17 @@ def init_db() -> None:
                 oven_5 REAL,
                 oven_6 REAL,
                 line_speed REAL,
-                log_time TEXT
+                log_time TEXT,
+                created_at TEXT
             )"""
         )
+        existing_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(logs)")
+        }
+        if "created_at" not in existing_columns:
+            connection.execute("ALTER TABLE logs ADD COLUMN created_at TEXT")
+        # Do not invent dates for historical rows: their original calendar date
+        # cannot be recovered from the old HH:MM:SS-only field.
 
 
 def get_next_id() -> int:
@@ -84,17 +93,18 @@ def get_all_rolls() -> list[tuple[int, str]]:
 
 
 def insert_roll(name: str, gsm: float, output: float) -> int:
-    """Create a roll and return the ID allocated by SQLite."""
+    """Create a roll with a UTC timestamp and return its allocated ID."""
+    created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with get_connection() as connection:
         cursor = connection.execute(
-            "INSERT INTO logs (name, gsm, output) VALUES (?, ?, ?)",
-            (name, gsm, output),
+            "INSERT INTO logs (name, gsm, output, created_at) VALUES (?, ?, ?, ?)",
+            (name, gsm, output, created_at),
         )
         return int(cursor.lastrowid)
 
 
 def update_roll_fields(roll_id: int, values: Mapping[str, Any]) -> bool:
-    """Update a safe, explicitly allow-listed subset of columns on a roll."""
+    """Update a safe, explicitly allow-listed subset of production fields."""
     editable = set(COLUMNS) - {"id"}
     if not values or not set(values).issubset(editable):
         raise ValueError("No fields supplied or unsupported field name.")
@@ -116,17 +126,18 @@ def delete_roll(roll_id: int) -> bool:
 
 
 def get_all_logs(descending: bool = True) -> list[dict[str, Any]]:
-    """Return all production records as dictionaries."""
+    """Return production records with supplemental creation timestamps."""
     order = "DESC" if descending else "ASC"
+    selected_columns = ", ".join((*COLUMNS, "created_at"))
     with get_connection() as connection:
         rows = connection.execute(
-            f"SELECT {', '.join(COLUMNS)} FROM logs ORDER BY id {order}"
+            f"SELECT {selected_columns} FROM logs ORDER BY id {order}"
         ).fetchall()
     return [dict(row) for row in rows]
 
 
 def generate_exact_xlsx() -> io.BytesIO:
-    """Build the requested Excel report in memory, preserving its exact layout."""
+    """Build the requested exact-layout Excel report in memory."""
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "Production Logs"
@@ -142,25 +153,16 @@ def generate_exact_xlsx() -> io.BytesIO:
             f"SELECT {', '.join(COLUMNS)} FROM logs ORDER BY id ASC"
         ).fetchall()
     for record in records:
-        row = [
-            record["id"],
-            record["name"],
-            record["right_resin"],
-            record["center_resin"],
-            record["left_resin"],
-            record["gsm"],
-            record["output"],
-            "", "", "", "",
-            record["oven_1"],
-            record["oven_2"],
-            record["oven_3"],
-            record["oven_4"],
-            record["oven_5"],
-            record["oven_6"],
-            record["line_speed"],
-            record["log_time"],
-        ]
-        sheet.append(row)
+        sheet.append(
+            [
+                record["id"], record["name"], record["right_resin"],
+                record["center_resin"], record["left_resin"], record["gsm"],
+                record["output"], "", "", "", "", record["oven_1"],
+                record["oven_2"], record["oven_3"], record["oven_4"],
+                record["oven_5"], record["oven_6"], record["line_speed"],
+                record["log_time"],
+            ]
+        )
     sheet.freeze_panes = "A3"
     output = io.BytesIO()
     workbook.save(output)
