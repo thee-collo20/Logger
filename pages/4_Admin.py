@@ -1,6 +1,7 @@
 """Password-protected admin dashboard with production trend and oven heatmap."""
 
 import hmac
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import plotly.express as px
@@ -9,6 +10,8 @@ import streamlit as st
 
 from db import COLUMNS, generate_exact_xlsx, get_all_logs, init_db
 from nav import render_nav
+
+FACTORY_TIMEZONE = ZoneInfo("Africa/Nairobi")
 
 st.set_page_config(page_title="Admin | Wood Lamination Logs", page_icon="🪵", layout="wide")
 
@@ -48,7 +51,6 @@ if data.empty:
 st.subheader("Factory at a glance")
 total_rolls = len(data)
 avg_gsm = pd.to_numeric(data["gsm"], errors="coerce").mean() if total_rolls else 0
-avg_output = pd.to_numeric(data["output"], errors="coerce").mean() if total_rolls else 0
 resin_logged = int(data[["right_resin", "center_resin", "left_resin"]].notna().all(axis=1).sum()) if total_rolls else 0
 oven_columns = [f"oven_{number}" for number in range(1, 7)]
 oven_logged = int(data[oven_columns].notna().all(axis=1).sum()) if total_rolls else 0
@@ -61,38 +63,33 @@ metric_cols[3].metric("Resin logged", f"{resin_logged}/{total_rolls}" if total_r
 metric_cols[4].metric("Oven settings logged", f"{oven_logged}/{total_rolls}" if total_rolls else "0/0")
 
 if total_rolls:
-    data["created_at_utc"] = pd.to_datetime(data["created_at"], errors="coerce", utc=True)
-    dated = data.dropna(subset=["created_at_utc"]).copy()
+    # Stored ISO timestamps include their original +03:00 offset. Parse them as
+    # instants, then group/display by the factory timezone for correct local dates.
+    data["created_at_eat"] = pd.to_datetime(data["created_at"], errors="coerce", utc=True).dt.tz_convert(FACTORY_TIMEZONE)
+    dated = data.dropna(subset=["created_at_eat"]).copy()
     trend_col, heatmap_col = st.columns([3, 2])
 
     with trend_col:
-        st.subheader("Production output over time")
+        st.subheader("Production output over time — East Africa Time")
         if dated.empty:
             st.info("No dated production records yet. Newly created rolls will appear here; existing historical rows have no recoverable date.")
         else:
             dated["output"] = pd.to_numeric(dated["output"], errors="coerce").fillna(0)
             daily = (
-                dated.assign(production_date=dated["created_at_utc"].dt.date)
+                dated.assign(production_date=dated["created_at_eat"].dt.date)
                 .groupby("production_date", as_index=False)["output"]
                 .sum()
                 .sort_values("production_date")
             )
             daily["cumulative_output"] = daily["output"].cumsum()
-            view = st.radio(
-                "Trend measure", ["Daily output", "Cumulative output"],
-                horizontal=True, key="admin_output_trend_measure",
-            )
+            view = st.radio("Trend measure", ["Daily output", "Cumulative output"], horizontal=True, key="admin_output_trend_measure")
             y_column = "output" if view == "Daily output" else "cumulative_output"
             y_label = "Output per day" if view == "Daily output" else "Cumulative output"
-            trend = px.line(
-                daily, x="production_date", y=y_column, markers=True,
-                labels={"production_date": "Production date", y_column: y_label},
-                title=view, template="plotly_dark",
-            )
+            trend = px.line(daily, x="production_date", y=y_column, markers=True, labels={"production_date": "Production date (EAT)", y_column: y_label}, title=view, template="plotly_dark")
             trend.update_traces(line_color="#F59E0B", marker_color="#FBBF24")
             trend.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=10, r=10, t=55, b=10))
             st.plotly_chart(trend, use_container_width=True)
-            st.caption("Dates are grouped in UTC. Each roll's date is captured when its Paper ID is created.")
+            st.caption("Timestamps are recorded and grouped in East Africa Time (Africa/Nairobi, UTC+03:00).")
 
     with heatmap_col:
         st.subheader("Oven temperature heatmap")
@@ -119,12 +116,7 @@ with action_col:
     if st.button("↻ Refresh dashboard", use_container_width=True):
         st.rerun()
 with download_col:
-    st.download_button(
-        "⬇ Download XLSX report", data=generate_exact_xlsx(),
-        file_name="wood_lamination_production.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
+    st.download_button("⬇ Download XLSX report", data=generate_exact_xlsx(), file_name="wood_lamination_production.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
 if total_rolls:
     st.dataframe(data.sort_values("id", ascending=True), use_container_width=True, hide_index=True)

@@ -1,18 +1,21 @@
 """Station page for oven temperatures, line speed, and production time."""
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
 from db import get_all_rolls, init_db, update_roll_fields
 from nav import render_nav
 
+FACTORY_TIMEZONE = ZoneInfo("Africa/Nairobi")
+
 st.set_page_config(page_title="Ovens & Line | Lamination Logger", page_icon="🪵", layout="centered")
 render_nav()
 init_db()
 
 st.title("Ovens & Line")
-st.caption("Log process settings for the selected roll")
+st.caption("Log process settings for the selected roll · East Africa Time")
 rolls = get_all_rolls()
 if not rolls:
     st.info("No rolls are available yet. Create a roll on the Paper ID station first.")
@@ -36,7 +39,7 @@ else:
         with third_row[1]:
             oven_6 = st.number_input("Oven 6", step=1.0, format="%.1f")
         line_speed = st.number_input("Line Speed (L/S)", min_value=0.0, value=0.0, step=0.1, format="%.2f")
-        log_time = st.text_input("Time (HH:MM:SS)", value=datetime.now().strftime("%H:%M:%S"))
+        log_time = st.text_input("Time (EAT, HH:MM:SS)", value=datetime.now(FACTORY_TIMEZONE).strftime("%H:%M:%S"))
         submitted = st.form_submit_button("Save Ovens & Line", type="primary", use_container_width=True)
     if submitted:
         if not log_time.strip():

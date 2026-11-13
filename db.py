@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import io
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
+from zoneinfo import ZoneInfo
 
 from openpyxl import Workbook
 
 DB_PATH = Path(__file__).resolve().parent / "production_logs.db"
+FACTORY_TIMEZONE = ZoneInfo("Africa/Nairobi")
 
 # Keep the report's established columns unchanged. created_at is supplemental
 # metadata used by time-series dashboards and is deliberately not in the XLSX.
@@ -93,8 +95,8 @@ def get_all_rolls() -> list[tuple[int, str]]:
 
 
 def insert_roll(name: str, gsm: float, output: float) -> int:
-    """Create a roll with a UTC timestamp and return its allocated ID."""
-    created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    """Create a roll with a factory-local East Africa timestamp."""
+    created_at = datetime.now(FACTORY_TIMEZONE).isoformat(timespec="seconds")
     with get_connection() as connection:
         cursor = connection.execute(
             "INSERT INTO logs (name, gsm, output, created_at) VALUES (?, ?, ?, ?)",
