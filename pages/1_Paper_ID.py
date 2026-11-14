@@ -8,7 +8,7 @@ from db import get_all_rolls, get_next_id, init_db, insert_roll
 from nav import render_footer, render_nav
 
 st.set_page_config(page_title="Paper ID | Biashara Masters Sawmill", page_icon="🪵", layout="centered")
-user = require_role({"Admin", "Supervisor", "Operator"})
+user = require_role({"Admin", "Supervisor", "Operator", "Secretary"})
 render_nav()
 init_db()
 

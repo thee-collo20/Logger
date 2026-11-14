@@ -3,7 +3,6 @@
 from datetime import datetime
 
 import pandas as pd
-import plotly.express as px
 import streamlit as st
 
 from auth import require_role
@@ -12,7 +11,7 @@ from nav import render_footer, render_nav
 from ocr_tools import get_hourly_oven_readings, process_oven_image
 
 st.set_page_config(page_title="Secretary Uploads | Biashara Masters Sawmill", page_icon="📷", layout="wide")
-user = require_role({"Admin", "Secretary"})
+user = require_role({"Admin"})
 render_nav()
 init_db()
 

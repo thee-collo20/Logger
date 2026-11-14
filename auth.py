@@ -13,13 +13,13 @@ from login_audit import record_failed_login, record_login
 LOGGER = logging.getLogger(__name__)
 PAGE_ROLES = {
     "Dashboard": {"Admin", "Supervisor"},
-    "Paper ID": {"Admin", "Supervisor", "Operator"},
+    "Paper ID": {"Admin", "Supervisor", "Operator", "Secretary"},
     "Resin Content": {"Admin", "Supervisor", "Operator"},
     "Ovens & Line": {"Admin", "Supervisor", "Operator"},
     "Admin": {"Admin", "Supervisor"},
     "Glue Recipes": {"Admin", "Glue Chef"},
-    "Secretary Uploads": {"Admin", "Secretary"},
-    "Production OCR": {"Admin", "Secretary"},
+    "Secretary Uploads": {"Admin"},
+    "Production OCR": {"Admin"},
 }
 VALID_RANKS = {rank for ranks in PAGE_ROLES.values() for rank in ranks}
 

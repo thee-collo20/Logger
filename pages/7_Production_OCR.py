@@ -11,7 +11,7 @@ from nav import render_footer, render_nav
 from ocr_tools import PRODUCTION_FIELDS, parse_production_values, run_ocr
 
 st.set_page_config(page_title="Production OCR | Biashara Masters Sawmill", page_icon="🔎", layout="wide")
-user = require_role({"Admin", "Secretary"})
+user = require_role({"Admin"})
 render_nav()
 init_db()
 
@@ -59,7 +59,7 @@ else:
         st.subheader("Review values")
         st.caption("Blank fields are left unchanged on the selected roll. Edit OCR results as needed.")
         value_inputs = {}
-        labels = {
+        field_labels = {
             "right_resin": "Right resin",
             "center_resin": "Center resin",
             "left_resin": "Left resin",
@@ -70,7 +70,7 @@ else:
             suggestion = extracted.get(field)
             with columns[index % 2]:
                 value_inputs[field] = st.text_input(
-                    labels[field],
+                    field_labels[field],
                     value=f"{suggestion:g}" if suggestion is not None else "",
                     key=f"ocr_review_{field}",
                     help="Leave blank to keep this field unchanged.",
@@ -89,19 +89,13 @@ else:
                     raise ValueError
                 changes[field] = value
             except ValueError:
-                invalid.append(labels[field])
+                invalid.append(field_labels[field])
         if invalid:
             st.error("Enter valid non-negative numbers for: " + ", ".join(invalid))
         elif not changes:
             st.warning("No values provided; nothing was saved.")
-        elif update_roll_fields(
-            selected_roll,
-            changes,
-            actor=user["username"],
-            rank=user["rank"],
-            station="Production OCR",
-        ):
-            st.success(f"Saved {', '.join(labels[field] for field in changes)} to {roll_labels[selected_roll]}.")
+        elif update_roll_fields(selected_roll, changes, actor=user["username"], rank=user["rank"], station="Production OCR"):
+            st.success(f"Saved {', '.join(field_labels[field] for field in changes)} to {roll_labels[selected_roll]}.")
         else:
             st.error("The selected roll no longer exists. Refresh and try again.")
 

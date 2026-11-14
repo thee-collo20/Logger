@@ -22,8 +22,6 @@ if last_login:
     )
 else:
     st.info("No successful sign-ins have been recorded yet.")
-if st.button("↻ Refresh Data", use_container_width=True):
-    st.rerun()
 records = get_all_logs(descending=False)
 if records:
     display_columns = [*COLUMNS, "shift_date", "shift_name", "logged_by", "updated_by", "updated_at"]
