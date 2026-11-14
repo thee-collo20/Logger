@@ -1,42 +1,44 @@
 # Logger
 
-Streamlit app for wood lamination production and paper glue recipe logging.
+Streamlit app for Biashara Masters Sawmill production and paper glue recipe logging.
 
 ## Authentication and ranks
 
-Configure accounts in Streamlit Community Cloud's **App settings → Secrets**, or in a local `.streamlit/secrets.toml` file (do not commit secrets). Each account has a unique username, password, and rank. Supported ranks are `Admin`, `Supervisor`, `Operator`, and `Glue Chef`.
+No working usernames or passwords are committed to this repository. Configure real accounts in Streamlit Community Cloud's **App settings → Secrets** (then save/restart the app), or locally in `.streamlit/secrets.toml`. Do not commit credentials. Usernames are case-insensitive; passwords are case-sensitive.
 
 ```toml
 [users.admin]
-password = "replace-with-a-strong-password"
+password = "choose-a-real-strong-password"
 rank = "Admin"
 
 [users.supervisor]
-password = "replace-with-a-strong-password"
+password = "choose-a-different-password"
 rank = "Supervisor"
 
 [users.operator]
-password = "replace-with-a-strong-password"
+password = "choose-a-different-password"
 rank = "Operator"
 
 [users.glue_chef]
-password = "replace-with-a-strong-password"
+password = "choose-a-different-password"
 rank = "Glue Chef"
 ```
 
 Permissions:
 
-- **Admin:** all pages.
+- **Admin:** all pages, including roll editing and deletion.
 - **Supervisor:** dashboard, production stations, and shift reports.
 - **Operator:** Paper ID, Resin Content, and Ovens & Line.
 - **Glue Chef:** paper glue recipe library.
 
-Authorization is checked inside each page as well as in the navigation, so hiding a link does not grant or deny access by itself. Configure at least one Admin account before deploying. Passwords must remain in Streamlit secrets, not in source control.
+Authorization is checked inside each page as well as in navigation. The previous single `admin_password` secret remains supported as an Admin account with username `admin` if no `[users.admin]` account is configured. If sign-in fails, verify credentials in the deployed app's Secrets (not repository files), exact password capitalization, and that the app restarted after the secrets were saved. Never put production passwords in source control.
 
 ## Production attribution and recipes
 
-New roll creation records the signed-in user as `logged_by`. Each station update records the latest editor and appends an attributed activity entry with the username, rank, station, changed fields, shift, and time; supervisors and admins can review this in **Shift Reports**. Existing database records are retained, but historical authors cannot be inferred and remain blank.
+New roll creation records the signed-in user as `logged_by`. Each station update records the latest editor and appends an attributed activity entry; Admins and Supervisors can review it in Shift Reports. Admins can edit or delete rolls from the **Edit or delete roll information** section. Deletions are also retained in the activity history. Existing rows are preserved during SQLite schema migration; historical authors cannot be inferred.
 
-The **Glue Recipes** page lets Admins and Glue Chefs maintain multiple uniquely named recipes, with ingredients/proportions, mixing instructions, and creator/update attribution. The SQLite schema is migrated automatically when the app starts.
+The **Glue Recipes** page lets Admins and Glue Chefs maintain multiple uniquely named recipes, with ingredients/proportions, mixing instructions, and creator/update attribution.
+
+The page footer displays **Biashara Masters Sawmill · v1.0.0 · a product of kutswaInc**.
 
 Run locally with `streamlit run app.py` after installing `requirements.txt` and configuring `.streamlit/secrets.toml`.

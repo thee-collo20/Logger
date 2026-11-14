@@ -7,15 +7,13 @@ import streamlit as st
 
 from auth import require_role
 from db import get_all_rolls, init_db, update_roll_fields
-from nav import render_nav
+from nav import render_footer, render_nav
 
 FACTORY_TIMEZONE = ZoneInfo("Africa/Nairobi")
-
-st.set_page_config(page_title="Ovens & Line | Lamination Logger", page_icon="🪵", layout="centered")
+st.set_page_config(page_title="Ovens & Line | Biashara Masters Sawmill", page_icon="🪵", layout="centered")
 user = require_role({"Admin", "Supervisor", "Operator"})
 render_nav()
 init_db()
-
 st.title("Ovens & Line")
 st.caption("Log process settings for the selected roll · East Africa Time")
 rolls = get_all_rolls()
@@ -46,17 +44,12 @@ else:
     if submitted:
         if not log_time.strip():
             st.error("Please enter a time.")
+        elif update_roll_fields(selected_id, {
+            "oven_1": oven_1, "oven_2": oven_2, "oven_3": oven_3,
+            "oven_4": oven_4, "oven_5": oven_5, "oven_6": oven_6,
+            "line_speed": line_speed, "log_time": log_time.strip(),
+        }, actor=user["username"], rank=user["rank"], station="Ovens & Line"):
+            st.success(f"Oven settings and line speed saved for {labels[selected_id]}.")
         else:
-            saved = update_roll_fields(
-                selected_id,
-                {
-                    "oven_1": oven_1, "oven_2": oven_2, "oven_3": oven_3,
-                    "oven_4": oven_4, "oven_5": oven_5, "oven_6": oven_6,
-                    "line_speed": line_speed, "log_time": log_time.strip(),
-                },
-                actor=user["username"], rank=user["rank"], station="Ovens & Line",
-            )
-            if saved:
-                st.success(f"Oven settings and line speed saved for {labels[selected_id]}.")
-            else:
-                st.error("The selected roll no longer exists. Refresh this page and try again.")
+            st.error("The selected roll no longer exists. Refresh this page and try again.")
+render_footer()

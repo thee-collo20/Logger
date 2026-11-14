@@ -7,7 +7,6 @@ from typing import Any
 
 import streamlit as st
 
-# Keep roles centralized so navigation and direct page access use the same policy.
 PAGE_ROLES = {
     "Dashboard": {"Admin", "Supervisor"},
     "Paper ID": {"Admin", "Supervisor", "Operator"},
@@ -20,21 +19,35 @@ VALID_RANKS = {rank for ranks in PAGE_ROLES.values() for rank in ranks}
 
 
 def _configured_users() -> dict[str, dict[str, Any]]:
-    """Return users configured in Streamlit secrets, keyed by lowercase username."""
-    if "users" not in st.secrets:
+    """Return valid users from Streamlit secrets, keyed by lowercase username."""
+    try:
+        configured = st.secrets.get("users", {})
+    except Exception:
         return {}
-    configured = st.secrets["users"]
     result: dict[str, dict[str, Any]] = {}
     for username, details in configured.items():
-        user = dict(details)
-        rank = str(user.get("rank", ""))
+        try:
+            user = dict(details)
+        except (TypeError, ValueError):
+            continue
+        rank_value = str(user.get("rank", "")).strip().casefold()
+        rank = next((known for known in VALID_RANKS if known.casefold() == rank_value), None)
         password = str(user.get("password", ""))
-        if username and password and rank in VALID_RANKS:
-            result[str(username).strip().lower()] = {
-                "username": str(username).strip(),
+        clean_username = str(username).strip()
+        if clean_username and password and rank:
+            result[clean_username.casefold()] = {
+                "username": clean_username,
                 "password": password,
                 "rank": rank,
             }
+    # Backward compatibility: the previous app accepted one admin_password.
+    # This account is only added if no explicit admin username is configured.
+    try:
+        legacy_password = str(st.secrets.get("admin_password", ""))
+    except Exception:
+        legacy_password = ""
+    if legacy_password and "admin" not in result:
+        result["admin"] = {"username": "admin", "password": legacy_password, "rank": "Admin"}
     return result
 
 
@@ -43,7 +56,7 @@ def current_user() -> dict[str, str] | None:
     username = st.session_state.get("auth_username")
     if not username:
         return None
-    user = _configured_users().get(str(username).lower())
+    user = _configured_users().get(str(username).casefold())
     if not user or st.session_state.get("auth_rank") != user["rank"]:
         st.session_state.pop("auth_username", None)
         st.session_state.pop("auth_rank", None)
@@ -56,15 +69,16 @@ def render_login() -> dict[str, str] | None:
     user = current_user()
     if user:
         return user
-
     users = _configured_users()
     if not users:
-        st.error("Authentication is not configured. Add user accounts under `[users.<username>]` in Streamlit secrets; see README.md.")
+        st.error(
+            "No accounts are configured. In Streamlit Cloud, add `[users.admin]` with `password` and `rank = \"Admin\"` under App settings → Secrets."
+        )
         st.stop()
 
-    st.title("🔐 Production Logger sign in")
+    st.title("🔐 Biashara Masters Sawmill sign in")
     with st.form("login_form"):
-        username = st.text_input("Username").strip().lower()
+        username = st.text_input("Username").strip().casefold()
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("Sign in", type="primary", use_container_width=True)
     if submitted:
@@ -73,7 +87,7 @@ def render_login() -> dict[str, str] | None:
             st.session_state["auth_username"] = account["username"]
             st.session_state["auth_rank"] = account["rank"]
             st.rerun()
-        st.error("Incorrect username or password.")
+        st.error("Incorrect username or password. Usernames are case-insensitive; check the deployed app's Secrets and save/restart after changes.")
     return None
 
 
