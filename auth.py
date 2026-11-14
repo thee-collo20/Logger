@@ -19,6 +19,7 @@ PAGE_ROLES = {
     "Admin": {"Admin", "Supervisor"},
     "Glue Recipes": {"Admin", "Glue Chef"},
     "Secretary Uploads": {"Admin", "Secretary"},
+    "Production OCR": {"Admin", "Secretary"},
 }
 VALID_RANKS = {rank for ranks in PAGE_ROLES.values() for rank in ranks}
 
@@ -45,14 +46,9 @@ def _configured_users() -> dict[str, dict[str, Any]]:
         password = str(user.get("password", ""))
         clean_username = str(username).strip()
         if clean_username and password and rank:
-            result[clean_username.casefold()] = {
-                "username": clean_username,
-                "password": password,
-                "rank": rank,
-            }
+            result[clean_username.casefold()] = {"username": clean_username, "password": password, "rank": rank}
         elif clean_username:
             LOGGER.warning("Ignoring account '%s': password or supported rank is missing", clean_username)
-
     try:
         legacy_password = str(st.secrets.get("admin_password", ""))
     except Exception:
@@ -80,21 +76,18 @@ def _handle_login_submit() -> None:
     username = str(st.session_state.get("login_username", "")).strip().casefold()
     password = str(st.session_state.get("login_password", ""))
     account = _configured_users().get(username)
-
     if account and hmac.compare_digest(password, account["password"]):
         st.session_state["auth_username"] = account["username"]
         st.session_state["auth_rank"] = account["rank"]
         st.session_state["login_error"] = ""
         record_login(account["username"], account["rank"])
     else:
-        attempted_user = username or "unknown"
-        record_failed_login(attempted_user)
+        record_failed_login(username or "unknown")
         st.session_state["login_error"] = (
             "Sign-in failed. Usernames are case-insensitive, passwords are case-sensitive. "
             "For the legacy `admin_password` secret, use username `admin`; otherwise check "
             "the account values in this app's deployed Streamlit Secrets."
         )
-
     st.session_state["login_username"] = ""
     st.session_state["login_password"] = ""
 
@@ -104,7 +97,6 @@ def render_login() -> dict[str, str] | None:
     user = current_user()
     if user:
         return user
-
     users = _configured_users()
     if not users:
         st.error(
@@ -112,15 +104,11 @@ def render_login() -> dict[str, str] | None:
             "Use `[users.admin]` with `password = \"...\"` and `rank = \"Admin\"`, then save and restart."
         )
         st.stop()
-
     st.title("🔐 Biashara Masters Sawmill sign in")
     with st.form("login_form", clear_on_submit=True):
         st.text_input("Username", placeholder="admin", key="login_username")
         st.text_input("Password", type="password", key="login_password")
-        st.form_submit_button(
-            "Sign in", type="primary", use_container_width=True, on_click=_handle_login_submit
-        )
-
+        st.form_submit_button("Sign in", type="primary", use_container_width=True, on_click=_handle_login_submit)
     error = st.session_state.pop("login_error", "")
     if error:
         st.error(error)
