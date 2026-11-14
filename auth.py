@@ -18,6 +18,7 @@ PAGE_ROLES = {
     "Ovens & Line": {"Admin", "Supervisor", "Operator"},
     "Admin": {"Admin", "Supervisor"},
     "Glue Recipes": {"Admin", "Glue Chef"},
+    "Secretary Uploads": {"Admin", "Secretary"},
 }
 VALID_RANKS = {rank for ranks in PAGE_ROLES.values() for rank in ranks}
 

@@ -11,6 +11,7 @@ _LINKS = [
     ("pages/3_Ovens_Line.py", "Ovens & Line", "🔥", "Ovens & Line"),
     ("pages/4_Admin.py", "Shift Reports", "📋", "Admin"),
     ("pages/5_Glue_Recipes.py", "Glue Recipes", "🧴", "Glue Recipes"),
+    ("pages/6_Secretary_Uploads.py", "Secretary Uploads", "📷", "Secretary Uploads"),
 ]
 
 

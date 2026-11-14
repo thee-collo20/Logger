@@ -15,6 +15,8 @@ from openpyxl import Workbook
 DB_PATH = Path(__file__).resolve().parent / "production_logs.db"
 FACTORY_TIMEZONE = ZoneInfo("Africa/Nairobi")
 SHIFT_NAMES = ("Day", "Night")
+IMAGE_CATEGORIES = {"hmi", "oven_temperature"}
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 COLUMNS = (
     "id", "name", "right_resin", "center_resin", "left_resin", "gsm",
     "output", "oven_1", "oven_2", "oven_3", "oven_4", "oven_5",
@@ -42,7 +44,7 @@ def shift_for_datetime(value: datetime) -> tuple[str, str]:
 
 
 def init_db() -> None:
-    """Create production/recipe tables and migrate existing databases safely."""
+    """Create production/recipe/upload tables and migrate existing databases safely."""
     with get_connection() as connection:
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute(
@@ -71,8 +73,6 @@ def init_db() -> None:
         for column in ("shift_date", "shift_name"):
             if column not in activity_columns:
                 connection.execute(f"ALTER TABLE log_activity ADD COLUMN {column} TEXT")
-        # Backfill activity shift context from the associated production record.
-        # Deleted records have no recoverable shift metadata in older databases.
         connection.execute(
             """UPDATE log_activity
                SET shift_date = (SELECT shift_date FROM logs WHERE logs.id = log_activity.roll_id),
@@ -86,6 +86,55 @@ def init_db() -> None:
                 updated_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
             )"""
         )
+        # This shared database table is the global image container across all signed-in users.
+        # extracted_numbers is reserved for a future OCR/capture step; uploads are not parsed yet.
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS image_uploads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT NOT NULL CHECK (category IN ('hmi', 'oven_temperature')),
+                filename TEXT NOT NULL, mime_type TEXT NOT NULL, image_data BLOB NOT NULL,
+                uploaded_by TEXT NOT NULL, uploaded_at TEXT NOT NULL,
+                extracted_numbers TEXT
+            )"""
+        )
+
+
+def save_image_upload(category: str, filename: str, mime_type: str, image_data: bytes, actor: str) -> int:
+    """Store one validated image in the global image container."""
+    if category not in IMAGE_CATEGORIES:
+        raise ValueError("Unsupported image category.")
+    if mime_type not in {"image/jpeg", "image/png", "image/webp"}:
+        raise ValueError("Upload a JPG, PNG, or WebP image.")
+    if not image_data or len(image_data) > MAX_UPLOAD_BYTES:
+        raise ValueError("The image must be non-empty and no larger than 10 MB.")
+    clean_name = Path(filename).name.strip()[:255] or "upload"
+    now = datetime.now(FACTORY_TIMEZONE).isoformat(timespec="seconds")
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """INSERT INTO image_uploads
+               (category, filename, mime_type, image_data, uploaded_by, uploaded_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (category, clean_name, mime_type, sqlite3.Binary(image_data), actor, now),
+        )
+        return int(cursor.lastrowid)
+
+
+def get_image_uploads(category: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    """Return the newest shared image uploads, optionally filtered by category."""
+    if category is not None and category not in IMAGE_CATEGORIES:
+        raise ValueError("Unsupported image category.")
+    safe_limit = max(1, min(int(limit), 500))
+    with get_connection() as connection:
+        if category:
+            rows = connection.execute(
+                "SELECT * FROM image_uploads WHERE category = ? ORDER BY id DESC LIMIT ?",
+                (category, safe_limit),
+            ).fetchall()
+        else:
+            rows = connection.execute(
+                "SELECT * FROM image_uploads ORDER BY id DESC LIMIT ?", (safe_limit,)
+            ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def get_next_id() -> int:
@@ -199,8 +248,6 @@ def get_recent_activity(limit: int = 500) -> list[dict[str, Any]]:
     except (sqlite3.Error, OSError):
         LOGGER.exception("Could not load shift activity with the current schema; trying legacy-safe fallback")
 
-    # Older app databases may not yet have the added shift columns. This query
-    # intentionally never references those columns on log_activity.
     try:
         with get_connection() as connection:
             rows = connection.execute(
