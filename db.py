@@ -14,9 +14,6 @@ from openpyxl import Workbook
 DB_PATH = Path(__file__).resolve().parent / "production_logs.db"
 FACTORY_TIMEZONE = ZoneInfo("Africa/Nairobi")
 SHIFT_NAMES = ("Day", "Night")
-
-# Keep the requested report columns unchanged. Timestamp and shift metadata are
-# supplemental database fields and are not added to the exact XLSX layout.
 COLUMNS = (
     "id", "name", "right_resin", "center_resin", "left_resin", "gsm",
     "output", "oven_1", "oven_2", "oven_3", "oven_4", "oven_5",
@@ -33,11 +30,7 @@ def get_connection() -> sqlite3.Connection:
 
 
 def shift_for_datetime(value: datetime) -> tuple[str, str]:
-    """Return (shift start date, shift name) in EAT for a local or aware datetime.
-
-    Day shift is 07:00 inclusive to 19:00 exclusive. Night shift is 19:00 to
-    07:00; after midnight, its shift date remains the date it started.
-    """
+    """Return the shift-start date and shift name in factory local time."""
     local = value.replace(tzinfo=FACTORY_TIMEZONE) if value.tzinfo is None else value.astimezone(FACTORY_TIMEZONE)
     clock = local.time().replace(tzinfo=None)
     if time(7, 0) <= clock < time(19, 0):
@@ -47,94 +40,153 @@ def shift_for_datetime(value: datetime) -> tuple[str, str]:
 
 
 def init_db() -> None:
-    """Create the log table and migrate timestamp/shift fields on older databases."""
+    """Create production/recipe tables and migrate older log databases."""
     with get_connection() as connection:
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute(
             """CREATE TABLE IF NOT EXISTS logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT,
-                right_resin REAL,
-                center_resin REAL,
-                left_resin REAL,
-                gsm REAL,
-                output REAL,
-                oven_1 REAL,
-                oven_2 REAL,
-                oven_3 REAL,
-                oven_4 REAL,
-                oven_5 REAL,
-                oven_6 REAL,
-                line_speed REAL,
-                log_time TEXT,
-                created_at TEXT,
-                shift_date TEXT,
-                shift_name TEXT
+                id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, right_resin REAL,
+                center_resin REAL, left_resin REAL, gsm REAL, output REAL,
+                oven_1 REAL, oven_2 REAL, oven_3 REAL, oven_4 REAL, oven_5 REAL,
+                oven_6 REAL, line_speed REAL, log_time TEXT, created_at TEXT,
+                shift_date TEXT, shift_name TEXT, logged_by TEXT, updated_by TEXT, updated_at TEXT
             )"""
         )
         existing = {row["name"] for row in connection.execute("PRAGMA table_info(logs)")}
-        for column in ("created_at", "shift_date", "shift_name"):
+        for column in ("created_at", "shift_date", "shift_name", "logged_by", "updated_by", "updated_at"):
             if column not in existing:
                 connection.execute(f"ALTER TABLE logs ADD COLUMN {column} TEXT")
-        # Legacy rows are intentionally left unassigned; their date/shift cannot
-        # be inferred reliably from the old time-only field.
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS log_activity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, roll_id INTEGER NOT NULL,
+                actor TEXT NOT NULL, rank TEXT NOT NULL, station TEXT NOT NULL,
+                action TEXT NOT NULL, changed_fields TEXT NOT NULL, created_at TEXT NOT NULL
+            )"""
+        )
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS glue_recipes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                ingredients TEXT NOT NULL, instructions TEXT NOT NULL, created_by TEXT NOT NULL,
+                updated_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            )"""
+        )
 
 
 def get_next_id() -> int:
-    """Return the next visible roll ID; SQLite allocates the ID on insert."""
     with get_connection() as connection:
-        row = connection.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM logs").fetchone()
-        return int(row[0])
+        return int(connection.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM logs").fetchone()[0])
 
 
 def get_all_rolls() -> list[tuple[int, str]]:
-    """Return roll IDs and names, newest first, for station selectors."""
     with get_connection() as connection:
         rows = connection.execute("SELECT id, name FROM logs ORDER BY id DESC").fetchall()
     return [(int(row["id"]), row["name"] or "") for row in rows]
 
 
-def insert_roll(name: str, gsm: float, output: float) -> int:
-    """Create a roll and assign it to the shift active at creation in EAT."""
-    now = datetime.now(FACTORY_TIMEZONE)
-    created_at = now.isoformat(timespec="seconds")
-    shift_date, shift_name = shift_for_datetime(now)
+def _record_activity(connection: sqlite3.Connection, roll_id: int, actor: str, rank: str,
+                     station: str, action: str, changed_fields: str, created_at: str) -> None:
+    connection.execute(
+        """INSERT INTO log_activity (roll_id, actor, rank, station, action, changed_fields, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (roll_id, actor, rank, station, action, changed_fields, created_at),
+    )
+
+
+def insert_roll(name: str, gsm: float, output: float, actor: str = "Unknown", rank: str = "Unknown") -> int:
+    now = datetime.now(FACTORY_TIMEZONE).isoformat(timespec="seconds")
+    shift_date, shift_name = shift_for_datetime(datetime.now(FACTORY_TIMEZONE))
     with get_connection() as connection:
         cursor = connection.execute(
-            """INSERT INTO logs (name, gsm, output, created_at, shift_date, shift_name)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (name, gsm, output, created_at, shift_date, shift_name),
+            """INSERT INTO logs (name, gsm, output, created_at, shift_date, shift_name, logged_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (name, gsm, output, now, shift_date, shift_name, actor),
         )
-        return int(cursor.lastrowid)
+        roll_id = int(cursor.lastrowid)
+        _record_activity(connection, roll_id, actor, rank, "Paper ID", "Created roll", "name, gsm, output", now)
+    return roll_id
 
 
-def update_roll_fields(roll_id: int, values: Mapping[str, Any]) -> bool:
-    """Update explicitly allow-listed production fields; shift tags are admin-editable."""
+def update_roll_fields(roll_id: int, values: Mapping[str, Any], actor: str = "Unknown",
+                       rank: str = "Unknown", station: str = "Production") -> bool:
     editable = (set(COLUMNS) - {"id"}) | {"shift_date", "shift_name"}
     if not values or not set(values).issubset(editable):
         raise ValueError("No fields supplied or unsupported field name.")
+    now = datetime.now(FACTORY_TIMEZONE).isoformat(timespec="seconds")
     assignments = ", ".join(f'"{column}" = ?' for column in values)
     parameters = [values[column] for column in values]
-    parameters.append(int(roll_id))
+    parameters.extend((actor, now, int(roll_id)))
     with get_connection() as connection:
-        cursor = connection.execute(f"UPDATE logs SET {assignments} WHERE id = ?", parameters)
-        return cursor.rowcount > 0
+        cursor = connection.execute(
+            f"UPDATE logs SET {assignments}, updated_by = ?, updated_at = ? WHERE id = ?", parameters
+        )
+        if not cursor.rowcount:
+            return False
+        _record_activity(connection, int(roll_id), actor, rank, station, "Updated production log", ", ".join(values), now)
+    return True
 
 
-def delete_roll(roll_id: int) -> bool:
-    """Delete one roll by its ID."""
+def delete_roll(roll_id: int, actor: str = "Unknown", rank: str = "Unknown") -> bool:
+    """Record an attributed deletion before removing the roll."""
+    now = datetime.now(FACTORY_TIMEZONE).isoformat(timespec="seconds")
     with get_connection() as connection:
-        cursor = connection.execute("DELETE FROM logs WHERE id = ?", (int(roll_id),))
-        return cursor.rowcount > 0
+        row = connection.execute("SELECT shift_date, shift_name FROM logs WHERE id = ?", (int(roll_id),)).fetchone()
+        if not row:
+            return False
+        _record_activity(connection, int(roll_id), actor, rank, "Admin", "Deleted roll", ", ".join(COLUMNS), now)
+        connection.execute("DELETE FROM logs WHERE id = ?", (int(roll_id),))
+        return True
+
+
+def get_recent_activity(limit: int = 500) -> list[dict[str, Any]]:
+    with get_connection() as connection:
+        rows = connection.execute(
+            """SELECT a.created_at, a.roll_id, COALESCE(l.shift_date, a.shift_date) AS shift_date,
+                      COALESCE(l.shift_name, a.shift_name) AS shift_name,
+                      a.actor, a.rank, a.station, a.action, a.changed_fields
+               FROM log_activity AS a LEFT JOIN logs AS l ON l.id = a.roll_id
+               ORDER BY a.id DESC LIMIT ?""",
+            (max(1, min(int(limit), 5000)),),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 def get_all_logs(descending: bool = True) -> list[dict[str, Any]]:
-    """Return records with timestamp and shift metadata, ordered by roll ID."""
     order = "DESC" if descending else "ASC"
-    columns = ", ".join((*COLUMNS, "created_at", "shift_date", "shift_name"))
+    columns = ", ".join((*COLUMNS, "created_at", "shift_date", "shift_name", "logged_by", "updated_by", "updated_at"))
     with get_connection() as connection:
         rows = connection.execute(f"SELECT {columns} FROM logs ORDER BY id {order}").fetchall()
     return [dict(row) for row in rows]
+
+
+def get_glue_recipes() -> list[dict[str, Any]]:
+    with get_connection() as connection:
+        rows = connection.execute("SELECT * FROM glue_recipes ORDER BY name COLLATE NOCASE").fetchall()
+    return [dict(row) for row in rows]
+
+
+def save_glue_recipe(name: str, ingredients: str, instructions: str, actor: str,
+                     recipe_id: int | None = None) -> int:
+    clean_name = name.strip()
+    if not clean_name or not ingredients.strip() or not instructions.strip():
+        raise ValueError("Recipe name, ingredients, and mixing instructions are required.")
+    now = datetime.now(FACTORY_TIMEZONE).isoformat(timespec="seconds")
+    with get_connection() as connection:
+        if recipe_id is None:
+            cursor = connection.execute(
+                """INSERT INTO glue_recipes
+                   (name, ingredients, instructions, created_by, updated_by, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (clean_name, ingredients.strip(), instructions.strip(), actor, actor, now, now),
+            )
+            return int(cursor.lastrowid)
+        cursor = connection.execute(
+            """UPDATE glue_recipes SET name = ?, ingredients = ?, instructions = ?,
+               updated_by = ?, updated_at = ? WHERE id = ?""",
+            (clean_name, ingredients.strip(), instructions.strip(), actor, now, int(recipe_id)),
+        )
+        if not cursor.rowcount:
+            raise ValueError("The selected recipe no longer exists. Refresh and try again.")
+        return int(recipe_id)
 
 
 def _build_workbook(records: list[sqlite3.Row]) -> io.BytesIO:
@@ -142,17 +194,13 @@ def _build_workbook(records: list[sqlite3.Row]) -> io.BytesIO:
     sheet = workbook.active
     sheet.title = "Production Logs"
     sheet.append(["", "", "Resin Content"])
-    sheet.append([
-        "ID", "Name", "Right", "Center", "Left", "GSM", "Output", "", "", "", "",
-        "oven 1", "Oven 2", "oven 3", "oven 4", "0ven 5", "Oven 6", "L/S", "Time",
-    ])
+    sheet.append(["ID", "Name", "Right", "Center", "Left", "GSM", "Output", "", "", "", "",
+                  "oven 1", "Oven 2", "oven 3", "oven 4", "0ven 5", "Oven 6", "L/S", "Time"])
     for record in records:
-        sheet.append([
-            record["id"], record["name"], record["right_resin"], record["center_resin"],
-            record["left_resin"], record["gsm"], record["output"], "", "", "", "",
-            record["oven_1"], record["oven_2"], record["oven_3"], record["oven_4"],
-            record["oven_5"], record["oven_6"], record["line_speed"], record["log_time"],
-        ])
+        sheet.append([record["id"], record["name"], record["right_resin"], record["center_resin"],
+                      record["left_resin"], record["gsm"], record["output"], "", "", "", "",
+                      record["oven_1"], record["oven_2"], record["oven_3"], record["oven_4"],
+                      record["oven_5"], record["oven_6"], record["line_speed"], record["log_time"]])
     sheet.freeze_panes = "A3"
     output = io.BytesIO()
     workbook.save(output)
@@ -161,17 +209,14 @@ def _build_workbook(records: list[sqlite3.Row]) -> io.BytesIO:
 
 
 def generate_exact_xlsx() -> io.BytesIO:
-    """Build the legacy all-record exact-layout report."""
     with get_connection() as connection:
         records = connection.execute(f"SELECT {', '.join(COLUMNS)} FROM logs ORDER BY id ASC").fetchall()
     return _build_workbook(records)
 
 
 def generate_shift_xlsx(shift_date: str, shift_name: str) -> io.BytesIO:
-    """Build an exact-layout workbook containing only one date and shift."""
     if shift_name not in SHIFT_NAMES:
         raise ValueError("shift_name must be 'Day' or 'Night'.")
-    # Validate canonical ISO date before using the date string as a query value.
     if date.fromisoformat(shift_date).isoformat() != shift_date:
         raise ValueError("shift_date must be an ISO date (YYYY-MM-DD).")
     with get_connection() as connection:
