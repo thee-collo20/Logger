@@ -14,6 +14,7 @@ from db import (
     COLUMNS, SHIFT_NAMES, delete_roll, generate_shift_xlsx, get_all_logs,
     get_recent_activity, init_db, update_roll_fields,
 )
+from login_audit import get_login_audit_csv
 from nav import render_footer, render_nav
 
 LOGGER = logging.getLogger(__name__)
@@ -207,4 +208,18 @@ if activity.empty:
     st.info("Activity history is temporarily unavailable or no activity has been recorded yet. Production reports and roll data remain available.")
 else:
     st.dataframe(activity, use_container_width=True, hide_index=True)
+
+if user["rank"] == "Admin":
+    st.divider()
+    st.header("Login audit")
+    login_csv = get_login_audit_csv()
+    if login_csv:
+        st.download_button(
+            "⬇ Download login activity CSV",
+            data=login_csv,
+            file_name="login_activity.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("No login audit file is available yet. Successful future sign-ins will be recorded here.")
 render_footer()

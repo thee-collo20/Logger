@@ -8,6 +8,8 @@ from typing import Any
 
 import streamlit as st
 
+from login_audit import record_login
+
 LOGGER = logging.getLogger(__name__)
 PAGE_ROLES = {
     "Dashboard": {"Admin", "Supervisor"},
@@ -73,6 +75,31 @@ def current_user() -> dict[str, str] | None:
     return {"username": user["username"], "rank": user["rank"]}
 
 
+def _handle_login_submit() -> None:
+    """Authenticate a submitted form and clear both credential widgets on every attempt."""
+    username = str(st.session_state.get("login_username", "")).strip().casefold()
+    password = str(st.session_state.get("login_password", ""))
+    account = _configured_users().get(username)
+
+    if account and hmac.compare_digest(password, account["password"]):
+        st.session_state["auth_username"] = account["username"]
+        st.session_state["auth_rank"] = account["rank"]
+        st.session_state["login_error"] = ""
+        # Audit failures must never prevent an otherwise valid login.
+        record_login(account["username"], account["rank"])
+    else:
+        st.session_state["login_error"] = (
+            "Sign-in failed. Usernames are case-insensitive, passwords are case-sensitive. "
+            "For the legacy `admin_password` secret, use username `admin`; otherwise check "
+            "the account values in this app's deployed Streamlit Secrets."
+        )
+
+    # A form callback runs before widgets are drawn again, so clearing state here
+    # leaves both fields blank after successful and unsuccessful attempts.
+    st.session_state["login_username"] = ""
+    st.session_state["login_password"] = ""
+
+
 def render_login() -> dict[str, str] | None:
     """Render credentials form and return authenticated account, if any."""
     user = current_user()
@@ -87,22 +114,16 @@ def render_login() -> dict[str, str] | None:
         st.stop()
 
     st.title("🔐 Biashara Masters Sawmill sign in")
-    with st.form("login_form"):
-        username = st.text_input("Username", placeholder="admin").strip().casefold()
-        password = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Sign in", type="primary", use_container_width=True)
-    if submitted:
-        account = users.get(username)
-        if account and hmac.compare_digest(password, account["password"]):
-            st.session_state["auth_username"] = account["username"]
-            st.session_state["auth_rank"] = account["rank"]
-            st.rerun()
-        st.error(
-            "Sign-in failed. Usernames are case-insensitive, passwords are case-sensitive. "
-            "If using the legacy `admin_password` secret, enter username `admin`. "
-            "Otherwise make sure the username, password, and rank in this app's deployed Secrets match."
+    with st.form("login_form", clear_on_submit=True):
+        st.text_input("Username", placeholder="admin", key="login_username")
+        st.text_input("Password", type="password", key="login_password")
+        st.form_submit_button(
+            "Sign in", type="primary", use_container_width=True, on_click=_handle_login_submit
         )
-    return None
+    error = st.session_state.pop("login_error", "")
+    if error:
+        st.error(error)
+    return current_user()
 
 
 def require_role(allowed_ranks: set[str] | tuple[str, ...] | list[str]) -> dict[str, str]:
