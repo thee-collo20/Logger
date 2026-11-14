@@ -31,13 +31,15 @@ Permissions:
 - **Operator:** Paper ID, Resin Content, and Ovens & Line.
 - **Glue Chef:** paper glue recipe library.
 
-Authorization is checked inside each page as well as in navigation. The previous single `admin_password` secret remains supported as an Admin account with username `admin` if no `[users.admin]` account is configured. If sign-in fails, verify credentials in the deployed app's Secrets (not repository files), exact password capitalization, and that the app restarted after the secrets were saved. Never put production passwords in source control.
+Authorization is checked inside each page as well as in navigation. The previous single `admin_password` secret remains supported as an Admin account with username `admin` if no `[users.admin]` account is configured. If sign-in fails, verify credentials in the deployed app's Secrets and that the app restarted after secrets were saved. Login inputs clear after each attempt. Never put production passwords in source control.
 
-## Production attribution and recipes
+## Production attribution, recipes, and audit files
 
-New roll creation records the signed-in user as `logged_by`. Each station update records the latest editor and appends an attributed activity entry; Admins and Supervisors can review it in Shift Reports. Admins can edit or delete rolls from the **Edit or delete roll information** section. Deletions are also retained in the activity history. Existing rows are preserved during SQLite schema migration; historical authors cannot be inferred.
+New roll creation records the signed-in user as `logged_by`. Each station update appends an attributed activity entry with shift date/name; Admins and Supervisors can review it in Shift Reports. Admins can edit or delete rolls, and those actions are also retained in the activity history. Existing rows are preserved during SQLite schema migration; historical authors cannot be inferred.
 
 The **Glue Recipes** page lets Admins and Glue Chefs maintain multiple uniquely named recipes, with ingredients/proportions, mixing instructions, and creator/update attribution.
+
+Successful sign-ins are appended to a separate `login_activity.csv` file with username, rank, and East Africa Time timestamp (never passwords). Admins can download the CSV from Shift Reports. On Streamlit Cloud this file is stored on the app's local filesystem and may not survive a rebuild/restart; use durable external storage if long-term retention is required.
 
 The page footer displays **Biashara Masters Sawmill · v1.0.0 · a product of kutswaInc**.
 

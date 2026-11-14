@@ -1,6 +1,8 @@
 """Rank-protected production reports, roll maintenance, and audit history."""
 
 from datetime import date
+import logging
+import sqlite3
 
 import pandas as pd
 import plotly.express as px
@@ -12,8 +14,10 @@ from db import (
     COLUMNS, SHIFT_NAMES, delete_roll, generate_shift_xlsx, get_all_logs,
     get_recent_activity, init_db, update_roll_fields,
 )
+from login_audit import get_last_successful_login, get_login_history, get_login_audit_csv
 from nav import render_footer, render_nav
 
+LOGGER = logging.getLogger(__name__)
 st.set_page_config(page_title="Shift Reports | Biashara Masters Sawmill", page_icon="🪵", layout="wide")
 user = require_role({"Admin", "Supervisor"})
 render_nav()
@@ -21,6 +25,14 @@ init_db()
 
 st.title("🪵 Biashara Masters Sawmill — Production Control")
 st.caption("Global production analytics, shift reports, and user-attributed logging history.")
+last_login = get_last_successful_login()
+if last_login:
+    st.success(
+        f"Last successful login: {last_login['username']} ({last_login['rank']}) at {last_login['logged_at_eat']} EAT"
+    )
+else:
+    st.info("No successful sign-ins have been recorded yet.")
+
 records = get_all_logs(descending=False)
 data = pd.DataFrame(records)
 if data.empty:
@@ -122,8 +134,7 @@ if user["rank"] == "Admin":
     else:
         roll_ids = data["id"].astype(int).tolist()
         selected_roll_id = st.selectbox(
-            "Select roll",
-            options=roll_ids,
+            "Select roll", options=roll_ids,
             format_func=lambda roll_id: f"#{roll_id} — {data.loc[data['id'] == roll_id, 'name'].iloc[0] or 'Unnamed roll'}",
             key="admin_roll_selection",
         )
@@ -151,9 +162,8 @@ if user["rank"] == "Admin":
                     oven_values.append(st.number_input(f"Oven {index + 1}", value=numeric_value(column), step=1.0, format="%.1f"))
             edit_speed = st.number_input("Line speed", min_value=0.0, value=numeric_value("line_speed"), step=0.1, format="%.2f")
             edit_time = st.text_input("Log time (EAT)", value=str(original.get("log_time") or ""))
-            edit_date_value = original.get("shift_date")
             try:
-                initial_shift_date = date.fromisoformat(str(edit_date_value)) if pd.notna(edit_date_value) else date.today()
+                initial_shift_date = date.fromisoformat(str(original.get("shift_date"))) if pd.notna(original.get("shift_date")) else date.today()
             except ValueError:
                 initial_shift_date = date.today()
             edit_shift_date = st.date_input("Shift start date", value=initial_shift_date, format="YYYY-MM-DD")
@@ -161,7 +171,8 @@ if user["rank"] == "Admin":
             old_shift = original.get("shift_name")
             if old_shift not in shift_options:
                 shift_options.append("Unassigned")
-            edit_shift = st.selectbox("Shift", shift_options, index=shift_options.index(old_shift) if old_shift in shift_options else shift_options.index("Unassigned"))
+            edit_shift = st.selectbox("Shift", shift_options,
+                                      index=shift_options.index(old_shift) if old_shift in shift_options else shift_options.index("Unassigned"))
             save_edit = st.form_submit_button("Save roll changes", type="primary", use_container_width=True)
         if save_edit:
             cleaned_name = edit_name.strip()
@@ -196,9 +207,32 @@ if user["rank"] == "Admin":
 
 st.divider()
 st.header("Who logged each shift entry")
-activity = pd.DataFrame(get_recent_activity())
+try:
+    activity = pd.DataFrame(get_recent_activity())
+except (sqlite3.Error, OSError, ValueError, TypeError):
+    LOGGER.exception("The activity history could not be displayed")
+    activity = pd.DataFrame()
 if activity.empty:
-    st.info("No attributed logging activity yet. New entries and station updates will appear here.")
+    st.info("Activity history is temporarily unavailable or no activity has been recorded yet. Production reports and roll data remain available.")
 else:
     st.dataframe(activity, use_container_width=True, hide_index=True)
+
+if user["rank"] == "Admin":
+    st.divider()
+    st.header("Login audit")
+    login_history = pd.DataFrame(get_login_history(limit=100))
+    if login_history.empty:
+        st.info("No login attempts have been recorded yet. Successful sign-ins and failed attempts will appear here.")
+    else:
+        st.dataframe(login_history, use_container_width=True, hide_index=True)
+    login_csv = get_login_audit_csv()
+    if login_csv:
+        st.download_button(
+            "⬇ Download login activity CSV",
+            data=login_csv,
+            file_name="login_activity.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("No login audit file is available yet. Successful future sign-ins and failed attempts will be recorded here.")
 render_footer()

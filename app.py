@@ -5,6 +5,7 @@ import streamlit as st
 
 from auth import require_role
 from db import COLUMNS, get_all_logs, init_db
+from login_audit import get_last_successful_login
 from nav import render_footer, render_nav
 
 st.set_page_config(page_title="Production Logs | Biashara Masters Sawmill", page_icon="🪵", layout="wide")
@@ -14,6 +15,13 @@ init_db()
 
 st.title("🪵 Biashara Masters Sawmill — Production Logs")
 st.caption(f"Supervisor dashboard · signed in as {user['username']} ({user['rank']})")
+last_login = get_last_successful_login()
+if last_login:
+    st.success(
+        f"Last successful login: {last_login['username']} ({last_login['rank']}) at {last_login['logged_at_eat']} EAT"
+    )
+else:
+    st.info("No successful sign-ins have been recorded yet.")
 if st.button("↻ Refresh Data", use_container_width=True):
     st.rerun()
 records = get_all_logs(descending=False)
