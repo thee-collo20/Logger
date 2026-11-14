@@ -1,6 +1,8 @@
 """Rank-protected production reports, roll maintenance, and audit history."""
 
 from datetime import date
+import logging
+import sqlite3
 
 import pandas as pd
 import plotly.express as px
@@ -14,6 +16,7 @@ from db import (
 )
 from nav import render_footer, render_nav
 
+LOGGER = logging.getLogger(__name__)
 st.set_page_config(page_title="Shift Reports | Biashara Masters Sawmill", page_icon="🪵", layout="wide")
 user = require_role({"Admin", "Supervisor"})
 render_nav()
@@ -122,8 +125,7 @@ if user["rank"] == "Admin":
     else:
         roll_ids = data["id"].astype(int).tolist()
         selected_roll_id = st.selectbox(
-            "Select roll",
-            options=roll_ids,
+            "Select roll", options=roll_ids,
             format_func=lambda roll_id: f"#{roll_id} — {data.loc[data['id'] == roll_id, 'name'].iloc[0] or 'Unnamed roll'}",
             key="admin_roll_selection",
         )
@@ -151,9 +153,8 @@ if user["rank"] == "Admin":
                     oven_values.append(st.number_input(f"Oven {index + 1}", value=numeric_value(column), step=1.0, format="%.1f"))
             edit_speed = st.number_input("Line speed", min_value=0.0, value=numeric_value("line_speed"), step=0.1, format="%.2f")
             edit_time = st.text_input("Log time (EAT)", value=str(original.get("log_time") or ""))
-            edit_date_value = original.get("shift_date")
             try:
-                initial_shift_date = date.fromisoformat(str(edit_date_value)) if pd.notna(edit_date_value) else date.today()
+                initial_shift_date = date.fromisoformat(str(original.get("shift_date"))) if pd.notna(original.get("shift_date")) else date.today()
             except ValueError:
                 initial_shift_date = date.today()
             edit_shift_date = st.date_input("Shift start date", value=initial_shift_date, format="YYYY-MM-DD")
@@ -161,7 +162,8 @@ if user["rank"] == "Admin":
             old_shift = original.get("shift_name")
             if old_shift not in shift_options:
                 shift_options.append("Unassigned")
-            edit_shift = st.selectbox("Shift", shift_options, index=shift_options.index(old_shift) if old_shift in shift_options else shift_options.index("Unassigned"))
+            edit_shift = st.selectbox("Shift", shift_options,
+                                      index=shift_options.index(old_shift) if old_shift in shift_options else shift_options.index("Unassigned"))
             save_edit = st.form_submit_button("Save roll changes", type="primary", use_container_width=True)
         if save_edit:
             cleaned_name = edit_name.strip()
@@ -196,9 +198,13 @@ if user["rank"] == "Admin":
 
 st.divider()
 st.header("Who logged each shift entry")
-activity = pd.DataFrame(get_recent_activity())
+try:
+    activity = pd.DataFrame(get_recent_activity())
+except (sqlite3.Error, OSError, ValueError, TypeError):
+    LOGGER.exception("The activity history could not be displayed")
+    activity = pd.DataFrame()
 if activity.empty:
-    st.info("No attributed logging activity yet. New entries and station updates will appear here.")
+    st.info("Activity history is temporarily unavailable or no activity has been recorded yet. Production reports and roll data remain available.")
 else:
     st.dataframe(activity, use_container_width=True, hide_index=True)
 render_footer()

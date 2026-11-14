@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import hmac
+import logging
 from typing import Any
 
 import streamlit as st
 
+LOGGER = logging.getLogger(__name__)
 PAGE_ROLES = {
     "Dashboard": {"Admin", "Supervisor"},
     "Paper ID": {"Admin", "Supervisor", "Operator"},
@@ -19,16 +21,21 @@ VALID_RANKS = {rank for ranks in PAGE_ROLES.values() for rank in ranks}
 
 
 def _configured_users() -> dict[str, dict[str, Any]]:
-    """Return valid users from Streamlit secrets, keyed by lowercase username."""
+    """Load supported accounts from Streamlit secrets without exposing passwords."""
     try:
         configured = st.secrets.get("users", {})
     except Exception:
+        LOGGER.exception("Unable to read Streamlit users secrets")
         return {}
     result: dict[str, dict[str, Any]] = {}
+    if not hasattr(configured, "items"):
+        LOGGER.error("The Streamlit [users] secret must be a table of username tables")
+        return {}
     for username, details in configured.items():
         try:
             user = dict(details)
         except (TypeError, ValueError):
+            LOGGER.warning("Ignoring malformed account entry in Streamlit secrets")
             continue
         rank_value = str(user.get("rank", "")).strip().casefold()
         rank = next((known for known in VALID_RANKS if known.casefold() == rank_value), None)
@@ -40,8 +47,10 @@ def _configured_users() -> dict[str, dict[str, Any]]:
                 "password": password,
                 "rank": rank,
             }
-    # Backward compatibility: the previous app accepted one admin_password.
-    # This account is only added if no explicit admin username is configured.
+        elif clean_username:
+            LOGGER.warning("Ignoring account '%s': password or supported rank is missing", clean_username)
+
+    # Backward compatibility with the earlier single-password configuration.
     try:
         legacy_password = str(st.secrets.get("admin_password", ""))
     except Exception:
@@ -65,20 +74,21 @@ def current_user() -> dict[str, str] | None:
 
 
 def render_login() -> dict[str, str] | None:
-    """Render a credentials form and return the authenticated user, if any."""
+    """Render credentials form and return authenticated account, if any."""
     user = current_user()
     if user:
         return user
     users = _configured_users()
     if not users:
         st.error(
-            "No accounts are configured. In Streamlit Cloud, add `[users.admin]` with `password` and `rank = \"Admin\"` under App settings → Secrets."
+            "No valid accounts were loaded. In Streamlit Cloud, check App settings → Secrets. "
+            "Use `[users.admin]` with `password = \"...\"` and `rank = \"Admin\"`, then save and restart."
         )
         st.stop()
 
     st.title("🔐 Biashara Masters Sawmill sign in")
     with st.form("login_form"):
-        username = st.text_input("Username").strip().casefold()
+        username = st.text_input("Username", placeholder="admin").strip().casefold()
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("Sign in", type="primary", use_container_width=True)
     if submitted:
@@ -87,12 +97,15 @@ def render_login() -> dict[str, str] | None:
             st.session_state["auth_username"] = account["username"]
             st.session_state["auth_rank"] = account["rank"]
             st.rerun()
-        st.error("Incorrect username or password. Usernames are case-insensitive; check the deployed app's Secrets and save/restart after changes.")
+        st.error(
+            "Sign-in failed. Usernames are case-insensitive, passwords are case-sensitive. "
+            "If using the legacy `admin_password` secret, enter username `admin`. "
+            "Otherwise make sure the username, password, and rank in this app's deployed Secrets match."
+        )
     return None
 
 
 def require_role(allowed_ranks: set[str] | tuple[str, ...] | list[str]) -> dict[str, str]:
-    """Require a signed-in user with one of the specified ranks, stopping otherwise."""
     user = render_login()
     if not user:
         st.stop()
@@ -103,7 +116,6 @@ def require_role(allowed_ranks: set[str] | tuple[str, ...] | list[str]) -> dict[
 
 
 def logout() -> None:
-    """Clear the current authenticated session."""
     st.session_state.pop("auth_username", None)
     st.session_state.pop("auth_rank", None)
     st.rerun()
