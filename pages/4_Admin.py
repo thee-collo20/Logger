@@ -14,7 +14,7 @@ from db import (
     COLUMNS, SHIFT_NAMES, delete_roll, generate_shift_xlsx, get_all_logs,
     get_recent_activity, init_db, update_roll_fields,
 )
-from login_audit import get_login_audit_csv
+from login_audit import get_last_successful_login, get_login_history, get_login_audit_csv
 from nav import render_footer, render_nav
 
 LOGGER = logging.getLogger(__name__)
@@ -25,6 +25,14 @@ init_db()
 
 st.title("🪵 Biashara Masters Sawmill — Production Control")
 st.caption("Global production analytics, shift reports, and user-attributed logging history.")
+last_login = get_last_successful_login()
+if last_login:
+    st.success(
+        f"Last successful login: {last_login['username']} ({last_login['rank']}) at {last_login['logged_at_eat']} EAT"
+    )
+else:
+    st.info("No successful sign-ins have been recorded yet.")
+
 records = get_all_logs(descending=False)
 data = pd.DataFrame(records)
 if data.empty:
@@ -212,6 +220,11 @@ else:
 if user["rank"] == "Admin":
     st.divider()
     st.header("Login audit")
+    login_history = pd.DataFrame(get_login_history(limit=100))
+    if login_history.empty:
+        st.info("No login attempts have been recorded yet. Successful sign-ins and failed attempts will appear here.")
+    else:
+        st.dataframe(login_history, use_container_width=True, hide_index=True)
     login_csv = get_login_audit_csv()
     if login_csv:
         st.download_button(
@@ -221,5 +234,5 @@ if user["rank"] == "Admin":
             mime="text/csv",
         )
     else:
-        st.info("No login audit file is available yet. Successful future sign-ins will be recorded here.")
+        st.info("No login audit file is available yet. Successful future sign-ins and failed attempts will be recorded here.")
 render_footer()

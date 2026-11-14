@@ -8,7 +8,7 @@ from typing import Any
 
 import streamlit as st
 
-from login_audit import record_login
+from login_audit import record_failed_login, record_login
 
 LOGGER = logging.getLogger(__name__)
 PAGE_ROLES = {
@@ -52,7 +52,6 @@ def _configured_users() -> dict[str, dict[str, Any]]:
         elif clean_username:
             LOGGER.warning("Ignoring account '%s': password or supported rank is missing", clean_username)
 
-    # Backward compatibility with the earlier single-password configuration.
     try:
         legacy_password = str(st.secrets.get("admin_password", ""))
     except Exception:
@@ -76,7 +75,7 @@ def current_user() -> dict[str, str] | None:
 
 
 def _handle_login_submit() -> None:
-    """Authenticate a submitted form and clear both credential widgets on every attempt."""
+    """Authenticate submitted credentials and clear input widgets after each attempt."""
     username = str(st.session_state.get("login_username", "")).strip().casefold()
     password = str(st.session_state.get("login_password", ""))
     account = _configured_users().get(username)
@@ -85,26 +84,26 @@ def _handle_login_submit() -> None:
         st.session_state["auth_username"] = account["username"]
         st.session_state["auth_rank"] = account["rank"]
         st.session_state["login_error"] = ""
-        # Audit failures must never prevent an otherwise valid login.
         record_login(account["username"], account["rank"])
     else:
+        attempted_user = username or "unknown"
+        record_failed_login(attempted_user)
         st.session_state["login_error"] = (
             "Sign-in failed. Usernames are case-insensitive, passwords are case-sensitive. "
             "For the legacy `admin_password` secret, use username `admin`; otherwise check "
             "the account values in this app's deployed Streamlit Secrets."
         )
 
-    # A form callback runs before widgets are drawn again, so clearing state here
-    # leaves both fields blank after successful and unsuccessful attempts.
     st.session_state["login_username"] = ""
     st.session_state["login_password"] = ""
 
 
 def render_login() -> dict[str, str] | None:
-    """Render credentials form and return authenticated account, if any."""
+    """Render the credentials form and return the authenticated account, if any."""
     user = current_user()
     if user:
         return user
+
     users = _configured_users()
     if not users:
         st.error(
@@ -120,6 +119,7 @@ def render_login() -> dict[str, str] | None:
         st.form_submit_button(
             "Sign in", type="primary", use_container_width=True, on_click=_handle_login_submit
         )
+
     error = st.session_state.pop("login_error", "")
     if error:
         st.error(error)
