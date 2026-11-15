@@ -104,9 +104,12 @@ def render_login() -> dict[str, str] | None:
             "Use `[users.admin]` with `password = \"...\"` and `rank = \"Admin\"`, then save and restart."
         )
         st.stop()
+    # Start with blank fields; do not suggest or prefill an account name.
+    st.session_state.setdefault("login_username", "")
+    st.session_state.setdefault("login_password", "")
     st.title("🔐 Biashara Masters Sawmill sign in")
     with st.form("login_form", clear_on_submit=True):
-        st.text_input("Username", placeholder="admin", key="login_username")
+        st.text_input("Username", key="login_username")
         st.text_input("Password", type="password", key="login_password")
         st.form_submit_button("Sign in", type="primary", use_container_width=True, on_click=_handle_login_submit)
     error = st.session_state.pop("login_error", "")
