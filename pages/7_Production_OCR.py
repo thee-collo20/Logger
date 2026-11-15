@@ -29,20 +29,33 @@ else:
         options=[roll_id for roll_id, _ in rolls],
         format_func=lambda roll_id: roll_labels[roll_id],
     )
-    uploaded = st.file_uploader(
-        "Upload a resin/output image (JPG, PNG, or WebP)",
-        type=["jpg", "jpeg", "png", "webp"],
-        key="production_ocr_image",
+
+    image_source = st.radio(
+        "Choose how to provide the image",
+        ("Take a photo", "Choose an image"),
+        horizontal=True,
+        key="production_ocr_source",
     )
-    image_key = hashlib.sha256(uploaded.getvalue()).hexdigest() if uploaded else None
+    if image_source == "Take a photo":
+        image = st.camera_input("Take a photo of the resin/output sheet", key="production_ocr_camera")
+        st.caption("The photo is used for OCR in this session and is not saved to the image archive.")
+    else:
+        image = st.file_uploader(
+            "Choose a resin/output image (JPG, PNG, or WebP)",
+            type=["jpg", "jpeg", "png", "webp"],
+            key="production_ocr_image",
+        )
+
+    image_bytes = image.getvalue() if image else None
+    image_key = hashlib.sha256(image_bytes).hexdigest() if image_bytes else None
     if st.session_state.get("production_ocr_image_key") != image_key:
         st.session_state.pop("production_ocr_text", None)
         st.session_state.pop("production_ocr_values", None)
         st.session_state["production_ocr_image_key"] = image_key
 
-    if uploaded and st.button("Read image with OCR", type="primary"):
+    if image_bytes and st.button("Read image with OCR", type="primary"):
         try:
-            text = run_ocr(uploaded.getvalue())
+            text = run_ocr(image_bytes)
             st.session_state["production_ocr_text"] = text
             st.session_state["production_ocr_values"] = parse_production_values(text)
             st.success("Image read. Confirm or correct the values below before saving.")
