@@ -18,7 +18,7 @@ FACTORY_TIMEZONE = ZoneInfo("Africa/Nairobi")
 REPORT_COLUMNS = [*COLUMNS, "created_at", "shift_date", "shift_name", "logged_by", "updated_by", "updated_at"]
 OVEN_COLUMNS = [f"oven_{number}" for number in range(1, 7)]
 st.set_page_config(page_title="Production Logs | Biashara Masters Sawmill", page_icon="🪵", layout="wide")
-user = require_role({"Admin", "Supervisor", "Production Manager"})
+user = require_role({"Admin", "Supervisor", "Production Manager"}, allow_production_manager=True)
 render_nav()
 init_db()
 
