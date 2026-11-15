@@ -174,8 +174,6 @@ if selected_rolls:
 else:
     st.info("No production records are available for the selected view.")
 
-if user["rank"] == "Production Manager":
-    st.info("Production Manager access is view-only.")
-else:
+if user["rank"] != "Production Manager":
     st.info("Use the Shift Reports page for detailed shift exports and activity history.")
 render_footer()
