@@ -10,12 +10,12 @@ from db import FACTORY_TIMEZONE, get_image_uploads, init_db, save_image_upload
 from nav import render_footer, render_nav
 from ocr_tools import get_hourly_oven_readings, process_oven_image
 
-st.set_page_config(page_title="Secretary Uploads | Biashara Masters Sawmill", page_icon="📷", layout="wide")
-user = require_role({"Admin"})
+st.set_page_config(page_title="Karani Uploads | Biashara Masters Sawmill", page_icon="📷", layout="wide")
+user = require_role({"Admin", "Secretary"})
 render_nav()
 init_db()
 
-st.title("Secretary image uploads")
+st.title("Karani image uploads")
 st.caption(f"Signed in as {user['username']} · uploads are shared in the global image container.")
 st.info("Oven images are OCR-processed into hourly readings when six values are detected. HMI images are archived as images.")
 
