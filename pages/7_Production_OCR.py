@@ -36,10 +36,16 @@ else:
         horizontal=True,
         key="production_ocr_source",
     )
+    image = None
     if image_source == "Take a photo":
-        image = st.camera_input("Take a photo of the resin/output sheet", key="production_ocr_camera")
-        st.caption("The photo is used for OCR in this session and is not saved to the image archive.")
+        if st.session_state.get("production_ocr_camera_enabled"):
+            image = st.camera_input("Capture the resin/output sheet", key="production_ocr_camera")
+            st.caption("The photo is used for OCR in this session and is not saved to the image archive.")
+        elif st.button("Take photo", type="secondary", key="production_ocr_open_camera"):
+            st.session_state["production_ocr_camera_enabled"] = True
+            st.rerun()
     else:
+        st.session_state["production_ocr_camera_enabled"] = False
         image = st.file_uploader(
             "Choose a resin/output image (JPG, PNG, or WebP)",
             type=["jpg", "jpeg", "png", "webp"],
