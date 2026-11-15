@@ -1,8 +1,9 @@
 """Rank-protected production reports, roll maintenance, and audit history."""
 
-from datetime import date
+from datetime import date, datetime
 import logging
 import sqlite3
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import plotly.express as px
@@ -12,12 +13,13 @@ import streamlit as st
 from auth import require_role
 from db import (
     COLUMNS, SHIFT_NAMES, delete_roll, generate_shift_xlsx, get_all_logs,
-    get_recent_activity, init_db, update_roll_fields,
+    get_recent_activity, init_db, shift_for_datetime, update_roll_fields,
 )
 from login_audit import get_last_successful_login, get_login_history, get_login_audit_csv
 from nav import render_footer, render_nav
 
 LOGGER = logging.getLogger(__name__)
+FACTORY_TIMEZONE = ZoneInfo("Africa/Nairobi")
 st.set_page_config(page_title="Shift Reports | Biashara Masters Sawmill", page_icon="🪵", layout="wide")
 user = require_role({"Admin", "Supervisor"})
 render_nav()
@@ -37,6 +39,32 @@ records = get_all_logs(descending=False)
 data = pd.DataFrame(records)
 if data.empty:
     data = pd.DataFrame(columns=[*COLUMNS, "created_at", "shift_date", "shift_name", "logged_by", "updated_by", "updated_at"])
+
+st.header("Shift production count")
+current_shift_date, current_shift_name = shift_for_datetime(datetime.now(FACTORY_TIMEZONE))
+count_scope = st.radio(
+    "Production count",
+    ["Current shift", "All shifts"],
+    horizontal=True,
+    key="production_count_scope",
+    help="Current shift shows only the active Day or Night shift in East Africa Time. Choose All shifts to include every recorded shift.",
+)
+if count_scope == "Current shift":
+    count_data = data[
+        (data["shift_date"] == current_shift_date)
+        & (data["shift_name"] == current_shift_name)
+    ].copy()
+    st.caption(f"Showing only the current {current_shift_name} shift · {current_shift_date} (EAT).")
+else:
+    count_data = data.copy()
+    st.caption("Showing production across all recorded shifts.")
+count_output = pd.to_numeric(count_data["output"], errors="coerce").sum(min_count=1)
+count_metrics = st.columns(2)
+count_metrics[0].metric("Rolls in selected scope", f"{len(count_data):,}")
+count_metrics[1].metric(
+    "Production output",
+    f"{count_output:,.1f}" if pd.notna(count_output) else "—",
+)
 
 st.header("Global factory overview")
 st.caption("Charts aggregate all assigned production logs across Day and Night shifts.")
