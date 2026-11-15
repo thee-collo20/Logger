@@ -21,7 +21,7 @@ from nav import render_footer, render_nav
 LOGGER = logging.getLogger(__name__)
 FACTORY_TIMEZONE = ZoneInfo("Africa/Nairobi")
 st.set_page_config(page_title="Shift Reports | Biashara Masters Sawmill", page_icon="🪵", layout="wide")
-user = require_role({"Admin", "Supervisor"})
+user = require_role({"Admin", "Supervisor", "Production Manager"})
 render_nav()
 init_db()
 
@@ -29,9 +29,7 @@ st.title("🪵 Biashara Masters Sawmill — Production Control")
 st.caption("Global production analytics, shift reports, and user-attributed logging history.")
 last_login = get_last_successful_login()
 if last_login:
-    st.success(
-        f"Last successful login: {last_login['username']} ({last_login['rank']}) at {last_login['logged_at_eat']} EAT"
-    )
+    st.success(f"Last successful login: {last_login['username']} ({last_login['rank']}) at {last_login['logged_at_eat']} EAT")
 else:
     st.info("No successful sign-ins have been recorded yet.")
 
@@ -42,18 +40,10 @@ if data.empty:
 
 st.header("Shift production count")
 current_shift_date, current_shift_name = shift_for_datetime(datetime.now(FACTORY_TIMEZONE))
-count_scope = st.radio(
-    "Production count",
-    ["Current shift", "All shifts"],
-    horizontal=True,
-    key="production_count_scope",
-    help="Current shift shows only the active Day or Night shift in East Africa Time. Choose All shifts to include every recorded shift.",
-)
+count_scope = st.radio("Production count", ["Current shift", "All shifts"], horizontal=True, key="production_count_scope",
+                       help="Current shift shows only the active Day or Night shift in East Africa Time. Choose All shifts to include every recorded shift.")
 if count_scope == "Current shift":
-    count_data = data[
-        (data["shift_date"] == current_shift_date)
-        & (data["shift_name"] == current_shift_name)
-    ].copy()
+    count_data = data[(data["shift_date"] == current_shift_date) & (data["shift_name"] == current_shift_name)].copy()
     st.caption(f"Showing only the current {current_shift_name} shift · {current_shift_date} (EAT).")
 else:
     count_data = data.copy()
@@ -61,10 +51,7 @@ else:
 count_output = pd.to_numeric(count_data["output"], errors="coerce").sum(min_count=1)
 count_metrics = st.columns(2)
 count_metrics[0].metric("Rolls in selected scope", f"{len(count_data):,}")
-count_metrics[1].metric(
-    "Production output",
-    f"{count_output:,.1f}" if pd.notna(count_output) else "—",
-)
+count_metrics[1].metric("Production output", f"{count_output:,.1f}" if pd.notna(count_output) else "—")
 
 st.header("Global factory overview")
 st.caption("Charts aggregate all assigned production logs across Day and Night shifts.")
@@ -83,7 +70,6 @@ metrics[0].metric("All rolls", f"{total_rolls:,}")
 metrics[1].metric("All-shift output", f"{total_output:,.1f}" if total_output is not None and pd.notna(total_output) else "—")
 metrics[2].metric("Resin completed", f"{resin_logged}/{total_rolls}" if total_rolls else "0/0")
 metrics[3].metric("Oven settings completed", f"{oven_logged}/{total_rolls}" if total_rolls else "0/0")
-
 if total_rolls:
     global_chart_col, global_heat_col = st.columns([3, 2])
     with global_chart_col:
@@ -116,15 +102,11 @@ if total_rolls:
         if oven_data.empty or not available_ovens:
             st.info("No oven temperature entries have been recorded yet.")
         else:
-            heat_labels = oven_data.apply(
-                lambda row: f"{row.get('shift_date') or 'Unassigned date'} {row.get('shift_name') or 'Unassigned shift'} · #{int(row['id'])}", axis=1
-            ).tolist()
-            heat = go.Figure(data=go.Heatmap(
-                z=oven_data[available_ovens].T.to_numpy(), x=heat_labels,
+            heat_labels = oven_data.apply(lambda row: f"{row.get('shift_date') or 'Unassigned date'} {row.get('shift_name') or 'Unassigned shift'} · #{int(row['id'])}", axis=1).tolist()
+            heat = go.Figure(data=go.Heatmap(z=oven_data[available_ovens].T.to_numpy(), x=heat_labels,
                 y=[f"Oven {int(column.split('_')[1])}" for column in available_ovens],
-                colorscale=[[0, "#1F3B3D"], [0.5, "#F59E0B"], [1, "#EF4444"]],
-                colorbar=dict(title="Temp"), hovertemplate="%{y}<br>%{x}<br>Temperature: %{z}<extra></extra>", connectgaps=False,
-            ))
+                colorscale=[[0, "#1F3B3D"], [0.5, "#F59E0B"], [1, "#EF4444"]], colorbar=dict(title="Temp"),
+                hovertemplate="%{y}<br>%{x}<br>Temperature: %{z}<extra></extra>", connectgaps=False))
             heat.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
                                margin=dict(l=10, r=10, t=25, b=10), xaxis_title="Shift date · shift · roll ID", yaxis_title="Oven")
             st.plotly_chart(heat, use_container_width=True)
@@ -145,13 +127,9 @@ else:
     st.metric("Rolls in selected shift", len(selected))
     report_columns = [*COLUMNS, "created_at", "shift_date", "shift_name", "logged_by", "updated_by", "updated_at"]
     st.dataframe(selected.sort_values("id", ascending=True)[report_columns], use_container_width=True, hide_index=True)
-st.download_button(
-    f"⬇ Download {shift_date_text} {shift_name} Shift XLSX",
-    data=generate_shift_xlsx(shift_date_text, shift_name),
-    file_name=f"wood_lamination_{shift_date_text}_{shift_name.lower()}_shift.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    use_container_width=True,
-)
+st.download_button(f"⬇ Download {shift_date_text} {shift_name} Shift XLSX", data=generate_shift_xlsx(shift_date_text, shift_name),
+                    file_name=f"wood_lamination_{shift_date_text}_{shift_name.lower()}_shift.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
 if user["rank"] == "Admin":
     st.divider()
@@ -161,11 +139,8 @@ if user["rank"] == "Admin":
         st.info("There are no rolls to edit or delete.")
     else:
         roll_ids = data["id"].astype(int).tolist()
-        selected_roll_id = st.selectbox(
-            "Select roll", options=roll_ids,
-            format_func=lambda roll_id: f"#{roll_id} — {data.loc[data['id'] == roll_id, 'name'].iloc[0] or 'Unnamed roll'}",
-            key="admin_roll_selection",
-        )
+        selected_roll_id = st.selectbox("Select roll", options=roll_ids,
+            format_func=lambda roll_id: f"#{roll_id} — {data.loc[data['id'] == roll_id, 'name'].iloc[0] or 'Unnamed roll'}", key="admin_roll_selection")
         original = data.loc[data["id"] == selected_roll_id].iloc[0]
 
         def numeric_value(field: str) -> float:
@@ -199,28 +174,23 @@ if user["rank"] == "Admin":
             old_shift = original.get("shift_name")
             if old_shift not in shift_options:
                 shift_options.append("Unassigned")
-            edit_shift = st.selectbox("Shift", shift_options,
-                                      index=shift_options.index(old_shift) if old_shift in shift_options else shift_options.index("Unassigned"))
+            edit_shift = st.selectbox("Shift", shift_options, index=shift_options.index(old_shift) if old_shift in shift_options else shift_options.index("Unassigned"))
             save_edit = st.form_submit_button("Save roll changes", type="primary", use_container_width=True)
         if save_edit:
             cleaned_name = edit_name.strip()
             if not cleaned_name:
                 st.error("Paper name cannot be empty.")
             else:
-                changes = {
-                    "name": cleaned_name, "gsm": edit_gsm, "output": edit_output,
+                changes = {"name": cleaned_name, "gsm": edit_gsm, "output": edit_output,
                     "right_resin": edit_right, "center_resin": edit_center, "left_resin": edit_left,
-                    **{column: value for column, value in zip(oven_columns, oven_values)},
-                    "line_speed": edit_speed, "log_time": edit_time.strip(),
-                    "shift_date": edit_shift_date.isoformat() if edit_shift != "Unassigned" else None,
-                    "shift_name": edit_shift if edit_shift != "Unassigned" else None,
-                }
+                    **{column: value for column, value in zip(oven_columns, oven_values)}, "line_speed": edit_speed,
+                    "log_time": edit_time.strip(), "shift_date": edit_shift_date.isoformat() if edit_shift != "Unassigned" else None,
+                    "shift_name": edit_shift if edit_shift != "Unassigned" else None}
                 if update_roll_fields(selected_roll_id, changes, actor=user["username"], rank=user["rank"], station="Admin edit"):
                     st.success(f"Roll #{selected_roll_id} updated.")
                     st.rerun()
                 else:
                     st.error("That roll no longer exists. Refresh and try again.")
-
         with st.form("admin_delete_roll_form"):
             confirm_delete = st.checkbox(f"I understand that deleting roll #{selected_roll_id} cannot be undone.")
             delete_submitted = st.form_submit_button("Delete selected roll", type="secondary", use_container_width=True)
@@ -244,7 +214,6 @@ if activity.empty:
     st.info("Activity history is temporarily unavailable or no activity has been recorded yet. Production reports and roll data remain available.")
 else:
     st.dataframe(activity, use_container_width=True, hide_index=True)
-
 if user["rank"] == "Admin":
     st.divider()
     st.header("Login audit")
@@ -255,12 +224,7 @@ if user["rank"] == "Admin":
         st.dataframe(login_history, use_container_width=True, hide_index=True)
     login_csv = get_login_audit_csv()
     if login_csv:
-        st.download_button(
-            "⬇ Download login activity CSV",
-            data=login_csv,
-            file_name="login_activity.csv",
-            mime="text/csv",
-        )
+        st.download_button("⬇ Download login activity CSV", data=login_csv, file_name="login_activity.csv", mime="text/csv")
     else:
         st.info("No login audit file is available yet. Successful future sign-ins and failed attempts will be recorded here.")
 render_footer()

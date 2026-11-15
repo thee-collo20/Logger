@@ -12,14 +12,14 @@ from login_audit import record_failed_login, record_login
 
 LOGGER = logging.getLogger(__name__)
 PAGE_ROLES = {
-    "Dashboard": {"Admin", "Supervisor"},
-    "Paper ID": {"Admin", "Supervisor", "Operator", "Secretary"},
-    "Resin Content": {"Admin", "Supervisor", "Operator"},
-    "Ovens & Line": {"Admin", "Supervisor", "Operator"},
-    "Admin": {"Admin", "Supervisor"},
-    "Glue Recipes": {"Admin", "Glue Chef"},
-    "Karani Uploads": {"Admin", "Secretary"},
-    "Production OCR": {"Admin"},
+    "Dashboard": {"Admin", "Supervisor", "Production Manager"},
+    "Paper ID": {"Admin", "Supervisor", "Operator", "Secretary", "Production Manager"},
+    "Resin Content": {"Admin", "Supervisor", "Operator", "Production Manager"},
+    "Ovens & Line": {"Admin", "Supervisor", "Operator", "Production Manager"},
+    "Admin": {"Admin", "Supervisor", "Production Manager"},
+    "Glue Recipes": {"Admin", "Glue Chef", "Production Manager"},
+    "Karani Uploads": {"Admin", "Secretary", "Production Manager"},
+    "Production OCR": {"Admin", "Production Manager"},
 }
 VALID_RANKS = {rank for ranks in PAGE_ROLES.values() for rank in ranks}
 
@@ -104,7 +104,6 @@ def render_login() -> dict[str, str] | None:
             "Use `[users.admin]` with `password = \"...\"` and `rank = \"Admin\"`, then save and restart."
         )
         st.stop()
-    # Start with blank fields; do not suggest or prefill an account name.
     st.session_state.setdefault("login_username", "")
     st.session_state.setdefault("login_password", "")
     st.title("🔐 Biashara Masters Sawmill sign in")
