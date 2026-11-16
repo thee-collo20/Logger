@@ -13,13 +13,23 @@ from login_audit import record_failed_login, record_login
 LOGGER = logging.getLogger(__name__)
 PAGE_ROLES = {
     "Dashboard": {"Admin", "Supervisor", "Production Manager"},
-    "Paper ID": {"Admin", "Supervisor", "Operator", "Secretary"},
-    "Resin Content": {"Admin", "Supervisor", "Operator"},
-    "Ovens & Line": {"Admin", "Supervisor", "Operator"},
-    "Admin": {"Admin", "Supervisor"},
-    "Glue Recipes": {"Admin", "Glue Chef"},
-    "Karani Uploads": {"Admin", "Secretary"},
-    "Production OCR": {"Admin"},
+    "Paper ID": {"Admin", "Supervisor", "Operator", "Secretary", "Production Manager"},
+    "Resin Content": {"Admin", "Supervisor", "Operator", "Production Manager"},
+    "Ovens & Line": {"Admin", "Supervisor", "Operator", "Production Manager"},
+    "Admin": {"Admin", "Supervisor", "Production Manager"},
+    "Glue Recipes": {"Admin", "Glue Chef", "Production Manager"},
+    "Karani Uploads": {"Admin", "Secretary", "Production Manager"},
+    "Production OCR": {"Admin", "Production Manager"},
+}
+_PAGE_PATHS = {
+    "Dashboard": "app.py",
+    "Paper ID": "pages/1_Paper_ID.py",
+    "Resin Content": "pages/2_Resin_Content.py",
+    "Ovens & Line": "pages/3_Ovens_Line.py",
+    "Admin": "pages/4_Admin.py",
+    "Glue Recipes": "pages/5_Glue_Recipes.py",
+    "Karani Uploads": "pages/6_Secretary_Uploads.py",
+    "Production OCR": "pages/7_Production_OCR.py",
 }
 VALID_RANKS = {rank for ranks in PAGE_ROLES.values() for rank in ranks}
 
@@ -122,16 +132,17 @@ def require_role(
     *,
     allow_production_manager: bool = False,
 ) -> dict[str, str]:
-    """Require an allowed rank; Production Managers must be explicitly permitted per page."""
+    """Require an allowed rank and redirect unauthorized users to an accessible page."""
     user = render_login()
     if not user:
         st.stop()
-    if user["rank"] == "Production Manager":
-        if not allow_production_manager:
-            st.error("Production Manager access is limited to the Dashboard.")
-            st.stop()
-    elif user["rank"] not in allowed_ranks:
-        st.error("Your rank does not have access to this page.")
+    if user["rank"] not in allowed_ranks:
+        destination = next(
+            (path for page, path in _PAGE_PATHS.items() if user["rank"] in PAGE_ROLES[page]),
+            None,
+        )
+        if destination:
+            st.switch_page(destination)
         st.stop()
     return user
 
