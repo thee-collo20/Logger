@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from auth import require_role
-from db import FACTORY_TIMEZONE, get_all_rolls, get_image_uploads, init_db, save_image_upload
+from db import FACTORY_TIMEZONE, get_all_rolls, get_image_uploads, init_db
 from hmi_archive import ensure_hmi_archive, get_hmi_photos, save_hmi_photo
 from nav import render_footer, render_nav
 from ocr_tools import get_hourly_oven_readings, process_oven_image
@@ -45,15 +45,30 @@ if not is_view_only:
             )
     elif rolls:
         roll_labels = {rid: f"#{rid} · {name or 'Unnamed roll'}" for rid, name in rolls}
-        related_roll = st.selectbox(
+        roll_id = st.selectbox(
             "Related roll (optional)",
             options=[None, *roll_labels],
             format_func=lambda rid: "No specific roll" if rid is None else roll_labels[rid],
             key="hmi_hourly_roll_id",
         )
-        roll_id = related_roll
 
-    photo = st.camera_input("Take HMI photo", key="hmi_archive_camera")
+    photo_method = st.radio(
+        "Choose how to add the HMI photo",
+        ["Upload a photo", "Take a photo"],
+        horizontal=True,
+        key="hmi_photo_method",
+        help="Your camera is only requested after you select Take a photo.",
+    )
+    photo = None
+    if photo_method == "Upload a photo":
+        photo = st.file_uploader(
+            "Choose an HMI photo · JPG, PNG, or WebP · 10 MB maximum",
+            type=["jpg", "jpeg", "png", "webp"],
+            key="hmi_photo_upload",
+        )
+    else:
+        photo = st.camera_input("Take HMI photo", key="hmi_archive_camera")
+
     if photo:
         st.image(photo, caption="Review before saving", use_container_width=True)
         if st.button("Save HMI photo to archive", type="primary", key="save_hmi_archive_photo"):
@@ -73,9 +88,10 @@ if not is_view_only:
     st.caption("Oven temperature images are OCR-processed into hourly readings when six values are detected.")
     oven_source = st.radio(
         "Choose how to add an oven image",
-        ("Choose image(s)", "Take a photo"),
+        ("Upload image(s)", "Take a photo"),
         horizontal=True,
         key="oven_image_source",
+        help="Your camera is only requested after you select Take a photo.",
     )
 
     def save_oven_image(filename: str, mime_type: str, image_bytes: bytes) -> bool:
@@ -93,7 +109,7 @@ if not is_view_only:
             st.error(f"Could not process {filename}: {error}")
             return False
 
-    if oven_source == "Choose image(s)":
+    if oven_source == "Upload image(s)":
         with st.form("oven_image_upload_form", clear_on_submit=True):
             uploads = st.file_uploader(
                 "Choose oven image(s) · JPG, PNG, or WebP · 10 MB maximum each",
@@ -139,8 +155,9 @@ with filter_col:
     archive_type_label = st.selectbox("Capture type", ["All captures", "Hourly checks", "After-roll photos"])
 archive_type = {"All captures": None, "Hourly checks": "hourly", "After-roll photos": "after_roll"}[archive_type_label]
 with roll_col:
-    archive_roll_options = [None, *[rid for rid, _ in get_all_rolls()]]
-    archive_roll_names = {rid: f"#{rid} · {name or 'Unnamed roll'}" for rid, name in get_all_rolls()}
+    archive_rolls = get_all_rolls()
+    archive_roll_options = [None, *[rid for rid, _ in archive_rolls]]
+    archive_roll_names = {rid: f"#{rid} · {name or 'Unnamed roll'}" for rid, name in archive_rolls}
     selected_archive_roll = st.selectbox(
         "Filter by roll", options=archive_roll_options,
         format_func=lambda rid: "All rolls" if rid is None else archive_roll_names[rid],
