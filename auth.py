@@ -19,7 +19,7 @@ PAGE_ROLES = {
     "Admin": {"Admin", "Supervisor", "Production Manager"},
     "Glue Recipes": {"Admin", "Glue Chef", "Production Manager"},
     "Karani Uploads": {"Admin", "Secretary", "Production Manager"},
-    "Production OCR": {"Admin", "Production Manager"},
+    "Production OCR": {"Admin", "Secretary", "Production Manager"},
 }
 _PAGE_PATHS = {
     "Dashboard": "app.py",
