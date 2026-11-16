@@ -13,13 +13,12 @@ from login_audit import record_failed_login, record_login
 LOGGER = logging.getLogger(__name__)
 PAGE_ROLES = {
     "Dashboard": {"Admin", "Supervisor", "Production Manager"},
-    "Paper ID": {"Admin", "Supervisor", "Operator", "Secretary", "Production Manager"},
-    "Resin Content": {"Admin", "Supervisor", "Operator", "Production Manager"},
-    "Ovens & Line": {"Admin", "Supervisor", "Operator", "Production Manager"},
-    "Admin": {"Admin", "Supervisor", "Production Manager"},
-    "Glue Recipes": {"Admin", "Glue Chef", "Production Manager"},
+    "Paper ID": {"Admin", "Supervisor", "Operator", "Secretary"},
+    "Resin Content": {"Admin", "Supervisor", "Operator"},
+    "Ovens & Line": {"Admin", "Supervisor", "Operator"},
+    "Admin": {"Admin", "Supervisor"},
+    "Glue Recipes": {"Admin", "Glue Chef"},
     "Karani Uploads": {"Admin", "Secretary", "Production Manager"},
-    "Production OCR": {"Admin", "Secretary", "Production Manager"},
 }
 _PAGE_PATHS = {
     "Dashboard": "app.py",
@@ -29,7 +28,6 @@ _PAGE_PATHS = {
     "Admin": "pages/4_Admin.py",
     "Glue Recipes": "pages/5_Glue_Recipes.py",
     "Karani Uploads": "pages/6_Secretary_Uploads.py",
-    "Production OCR": "pages/7_Production_OCR.py",
 }
 VALID_RANKS = {rank for ranks in PAGE_ROLES.values() for rank in ranks}
 
@@ -132,7 +130,7 @@ def require_role(
     *,
     allow_production_manager: bool = False,
 ) -> dict[str, str]:
-    """Require an allowed rank and redirect unauthorized users to an accessible page."""
+    """Require an allowed rank; redirect anyone else to an accessible page."""
     user = render_login()
     if not user:
         st.stop()
