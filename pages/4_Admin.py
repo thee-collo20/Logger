@@ -131,23 +131,23 @@ st.download_button(f"⬇ Download {shift_date_text} {shift_name} Shift XLSX", da
                     file_name=f"wood_lamination_{shift_date_text}_{shift_name.lower()}_shift.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
 
-if user["rank"] == "Admin":
+if user["rank"] in {"Admin", "Supervisor"}:
     st.divider()
-    st.header("Edit or delete roll information")
-    st.caption("These controls are restricted to Admin. Every edit and deletion is recorded in the activity history.")
+    st.header("Edit shift report")
+    st.caption("Admins and Supervisors can update roll information. All changes are recorded in the activity history; only Admins can delete rolls.")
     if data.empty:
-        st.info("There are no rolls to edit or delete.")
+        st.info("There are no rolls to edit.")
     else:
         roll_ids = data["id"].astype(int).tolist()
         selected_roll_id = st.selectbox("Select roll", options=roll_ids,
-            format_func=lambda roll_id: f"#{roll_id} — {data.loc[data['id'] == roll_id, 'name'].iloc[0] or 'Unnamed roll'}", key="admin_roll_selection")
+            format_func=lambda roll_id: f"#{roll_id} — {data.loc[data['id'] == roll_id, 'name'].iloc[0] or 'Unnamed roll'}", key="report_edit_roll_selection")
         original = data.loc[data["id"] == selected_roll_id].iloc[0]
 
         def numeric_value(field: str) -> float:
             value = pd.to_numeric(original.get(field), errors="coerce")
             return float(value) if pd.notna(value) else 0.0
 
-        with st.form("admin_edit_roll_form"):
+        with st.form("shift_report_edit_roll_form"):
             edit_name = st.text_input("Paper name", value=str(original.get("name") or ""))
             edit_gsm = st.number_input("GSM", min_value=0.0, value=numeric_value("gsm"), step=1.0)
             edit_output = st.number_input("Output", min_value=0.0, value=numeric_value("output"), step=1.0)
@@ -175,7 +175,7 @@ if user["rank"] == "Admin":
             if old_shift not in shift_options:
                 shift_options.append("Unassigned")
             edit_shift = st.selectbox("Shift", shift_options, index=shift_options.index(old_shift) if old_shift in shift_options else shift_options.index("Unassigned"))
-            save_edit = st.form_submit_button("Save roll changes", type="primary", use_container_width=True)
+            save_edit = st.form_submit_button("Save shift report changes", type="primary", use_container_width=True)
         if save_edit:
             cleaned_name = edit_name.strip()
             if not cleaned_name:
@@ -186,22 +186,23 @@ if user["rank"] == "Admin":
                     **{column: value for column, value in zip(oven_columns, oven_values)}, "line_speed": edit_speed,
                     "log_time": edit_time.strip(), "shift_date": edit_shift_date.isoformat() if edit_shift != "Unassigned" else None,
                     "shift_name": edit_shift if edit_shift != "Unassigned" else None}
-                if update_roll_fields(selected_roll_id, changes, actor=user["username"], rank=user["rank"], station="Admin edit"):
+                if update_roll_fields(selected_roll_id, changes, actor=user["username"], rank=user["rank"], station="Shift report edit"):
                     st.success(f"Roll #{selected_roll_id} updated.")
                     st.rerun()
                 else:
                     st.error("That roll no longer exists. Refresh and try again.")
-        with st.form("admin_delete_roll_form"):
-            confirm_delete = st.checkbox(f"I understand that deleting roll #{selected_roll_id} cannot be undone.")
-            delete_submitted = st.form_submit_button("Delete selected roll", type="secondary", use_container_width=True)
-        if delete_submitted:
-            if not confirm_delete:
-                st.error("Confirm the deletion before continuing.")
-            elif delete_roll(selected_roll_id, actor=user["username"], rank=user["rank"]):
-                st.success(f"Roll #{selected_roll_id} deleted.")
-                st.rerun()
-            else:
-                st.error("That roll no longer exists. Refresh and try again.")
+        if user["rank"] == "Admin":
+            with st.form("admin_delete_roll_form"):
+                confirm_delete = st.checkbox(f"I understand that deleting roll #{selected_roll_id} cannot be undone.")
+                delete_submitted = st.form_submit_button("Delete selected roll", type="secondary", use_container_width=True)
+            if delete_submitted:
+                if not confirm_delete:
+                    st.error("Confirm the deletion before continuing.")
+                elif delete_roll(selected_roll_id, actor=user["username"], rank=user["rank"]):
+                    st.success(f"Roll #{selected_roll_id} deleted.")
+                    st.rerun()
+                else:
+                    st.error("That roll no longer exists. Refresh and try again.")
 
 st.divider()
 st.header("Who logged each shift entry")
