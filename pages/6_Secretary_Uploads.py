@@ -1,4 +1,4 @@
-"""Rank-protected upload page for oven-temperature images and HMI photos."""
+"""Rank-protected upload page for per-roll oven-temperature images and HMI photos."""
 
 from datetime import datetime
 
@@ -84,60 +84,74 @@ if not is_view_only:
                 st.rerun()
 
     st.divider()
-    st.header("Oven temperature image upload")
-    st.caption("Oven temperature images are OCR-processed into hourly readings when six values are detected.")
-    oven_source = st.radio(
-        "Choose how to add an oven image",
-        ("Upload image(s)", "Take a photo"),
-        horizontal=True,
-        key="oven_image_source",
-        help="Your camera is only requested after you select Take a photo.",
-    )
-
-    def save_oven_image(filename: str, mime_type: str, image_bytes: bytes) -> bool:
-        """Store and process one oven image, displaying the OCR outcome."""
-        try:
-            result = process_oven_image(filename, mime_type, image_bytes, user["username"])
-            if result["reading_id"]:
-                st.success(f"Saved {filename}; OCR recorded hourly temperatures {result['values']}.")
-            else:
-                st.warning("Image archived, but OCR did not find six values. Review its OCR text in the archive.")
-                with st.expander(f"OCR text: {filename}"):
-                    st.text(result["raw_text"] or "No text detected.")
-            return True
-        except (ValueError, RuntimeError) as error:
-            st.error(f"Could not process {filename}: {error}")
-            return False
-
-    if oven_source == "Upload image(s)":
-        with st.form("oven_image_upload_form", clear_on_submit=True):
-            uploads = st.file_uploader(
-                "Choose oven image(s) · JPG, PNG, or WebP · 10 MB maximum each",
-                type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True,
-                key="oven_image_uploads",
-            )
-            submitted = st.form_submit_button("Upload oven images", type="primary", use_container_width=True)
-        if submitted:
-            if not uploads:
-                st.warning("Select at least one image.")
-            else:
-                saved = sum(save_oven_image(upload.name, upload.type or "", upload.getvalue()) for upload in uploads)
-                if saved:
-                    st.rerun()
+    st.header("Oven temperature image upload · per roll")
+    st.caption("Oven temperatures are saved to the selected roll, not as hourly readings.")
+    oven_rolls = get_all_rolls()
+    if not oven_rolls:
+        st.warning("Create a Paper ID before uploading oven temperatures; readings must be assigned to a roll.")
     else:
-        oven_photo = st.camera_input("Capture oven temperatures", key="oven_camera_capture")
-        if oven_photo and st.button("Save and read oven photo", type="primary", key="save_oven_camera_photo"):
-            if save_oven_image(oven_photo.name or "oven-photo.jpg", oven_photo.type or "image/jpeg", oven_photo.getvalue()):
-                st.rerun()
+        oven_roll_labels = {rid: f"#{rid} · {name or 'Unnamed roll'}" for rid, name in oven_rolls}
+        oven_roll_id = st.selectbox(
+            "Roll for these oven temperatures",
+            options=[rid for rid, _ in oven_rolls],
+            format_func=lambda rid: oven_roll_labels[rid],
+            key="oven_temperature_roll_id",
+        )
+        oven_source = st.radio(
+            "Choose how to add an oven image",
+            ("Upload image(s)", "Take a photo"),
+            horizontal=True,
+            key="oven_image_source",
+            help="Your camera is only requested after you select Take a photo.",
+        )
+
+        def save_oven_image(filename: str, mime_type: str, image_bytes: bytes) -> bool:
+            """Store and process one oven image, displaying the OCR outcome."""
+            try:
+                result = process_oven_image(
+                    filename, mime_type, image_bytes, user["username"], user["rank"], oven_roll_id
+                )
+                if result["roll_id"]:
+                    st.success(f"Saved {filename}; OCR updated oven temperatures for {oven_roll_labels[oven_roll_id]}: {result['values']}.")
+                else:
+                    st.warning("Image archived, but OCR did not find six values or the selected roll no longer exists. Review the OCR text in the archive.")
+                    with st.expander(f"OCR text: {filename}"):
+                        st.text(result["raw_text"] or "No text detected.")
+                return True
+            except (ValueError, RuntimeError) as error:
+                st.error(f"Could not process {filename}: {error}")
+                return False
+
+        if oven_source == "Upload image(s)":
+            with st.form("oven_image_upload_form", clear_on_submit=True):
+                uploads = st.file_uploader(
+                    "Choose oven image(s) · JPG, PNG, or WebP · 10 MB maximum each",
+                    type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True,
+                    key="oven_image_uploads",
+                )
+                submitted = st.form_submit_button("Upload oven images", type="primary", use_container_width=True)
+            if submitted:
+                if not uploads:
+                    st.warning("Select at least one image.")
+                else:
+                    saved = sum(save_oven_image(upload.name, upload.type or "", upload.getvalue()) for upload in uploads)
+                    if saved:
+                        st.rerun()
+        else:
+            oven_photo = st.camera_input("Capture oven temperatures", key="oven_camera_capture")
+            if oven_photo and st.button("Save oven temperatures to roll", type="primary", key="save_oven_camera_photo"):
+                if save_oven_image(oven_photo.name or "oven-photo.jpg", oven_photo.type or "image/jpeg", oven_photo.getvalue()):
+                    st.rerun()
 else:
     st.info("Production Manager access is view-only.")
 
 st.divider()
-st.header("Today's hourly oven temperature dashboard")
+st.header("Retained historical hourly oven temperature readings")
+st.caption("Existing hourly readings are preserved here. New oven-temperature captures are assigned to individual rolls above.")
 reading_date = datetime.now(FACTORY_TIMEZONE).date().isoformat()
 readings = get_hourly_oven_readings(reading_date, limit=48)
 if not readings:
-    st.info("No oven temperature readings have been captured today yet.")
+    st.info("No historical hourly oven temperature readings are recorded for today.")
 else:
     frame = pd.DataFrame(readings)
     frame["captured_at"] = pd.to_datetime(frame["captured_at"], errors="coerce")
@@ -146,7 +160,7 @@ else:
     st.line_chart(frame.set_index("captured_at")[oven_columns], y_label="Temperature")
     table_columns = ["reading_date", "hour_label", *oven_columns, "source_filename", "uploaded_by", "captured_at"]
     st.dataframe(frame[table_columns], use_container_width=True, hide_index=True)
-    st.caption("All captures are retained, including multiple images uploaded in the same hour.")
+    st.caption("These legacy records remain available; no new hourly readings are created.")
 
 st.divider()
 st.header("HMI photo archive")
